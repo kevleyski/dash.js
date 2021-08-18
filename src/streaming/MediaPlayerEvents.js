@@ -29,6 +29,7 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 import EventsBase from '../core/events/EventsBase';
+
 /**
  * @class
  * @implements EventsBase
@@ -69,6 +70,18 @@ class MediaPlayerEvents extends EventsBase {
         this.BUFFER_LEVEL_STATE_CHANGED = 'bufferStateChanged';
 
         /**
+         * Triggered when the buffer level of a media type has been updated
+         * @event MediaPlayerEvents#BUFFER_LEVEL_UPDATED
+         */
+        this.BUFFER_LEVEL_UPDATED = 'bufferLevelUpdated';
+
+        /**
+         * Triggered when a dynamic stream changed to static (transition phase between Live and On-Demand).
+         * @event MediaPlayerEvents#DYNAMIC_TO_STATIC
+         */
+        this.DYNAMIC_TO_STATIC = 'dynamicToStatic';
+
+        /**
          * Triggered when there is an error from the element or MSE source buffer.
          * @event MediaPlayerEvents#ERROR
          */
@@ -102,7 +115,6 @@ class MediaPlayerEvents extends EventsBase {
          */
         this.LOG = 'log';
 
-        //TODO refactor with internal event
         /**
          * Triggered when the manifest load is complete
          * @event MediaPlayerEvents#MANIFEST_LOADED
@@ -140,10 +152,10 @@ class MediaPlayerEvents extends EventsBase {
         this.PERIOD_SWITCH_COMPLETED = 'periodSwitchCompleted';
 
         /**
-         * Triggered when a new period starts.
-         * @event MediaPlayerEvents#PERIOD_SWITCH_STARTED
+         * Triggered when a new stream (period) starts.
+         * @event MediaPlayerEvents#STREAM_SWITCH_STARTED
          */
-        this.PERIOD_SWITCH_STARTED = 'periodSwitchStarted';
+        this.STREAM_SWITCH_STARTED = 'streamSwitchStarted';
 
         /**
          * Triggered when an ABR up /down switch is initiated; either by user in manual mode or auto mode via ABR rules.
@@ -164,12 +176,6 @@ class MediaPlayerEvents extends EventsBase {
         this.TRACK_CHANGE_RENDERED = 'trackChangeRendered';
 
         /**
-         * Triggered when the source is setup and ready.
-         * @event MediaPlayerEvents#SOURCE_INITIALIZED
-         */
-        this.SOURCE_INITIALIZED = 'sourceInitialized';
-
-        /**
          * Triggered when a stream (period) is being loaded
          * @event MediaPlayerEvents#STREAM_INITIALIZING
          */
@@ -177,6 +183,24 @@ class MediaPlayerEvents extends EventsBase {
 
         /**
          * Triggered when a stream (period) is loaded
+         * @event MediaPlayerEvents#STREAM_UPDATED
+         */
+        this.STREAM_UPDATED = 'streamUpdated';
+
+        /**
+         * Triggered when a stream (period) is activated
+         * @event MediaPlayerEvents#STREAM_ACTIVATED
+         */
+        this.STREAM_ACTIVATED = 'streamActivated';
+
+        /**
+         * Triggered when a stream (period) is deactivated
+         * @event MediaPlayerEvents#STREAM_DEACTIVATED
+         */
+        this.STREAM_DEACTIVATED = 'streamDeactivated';
+
+        /**
+         * Triggered when a stream (period) is activated
          * @event MediaPlayerEvents#STREAM_INITIALIZED
          */
         this.STREAM_INITIALIZED = 'streamInitialized';
@@ -232,6 +256,12 @@ class MediaPlayerEvents extends EventsBase {
         this.CAN_PLAY = 'canPlay';
 
         /**
+         * This corresponds to the CAN_PLAY_THROUGH readyState.
+         * @event MediaPlayerEvents#CAN_PLAY_THROUGH
+         */
+        this.CAN_PLAY_THROUGH = 'canPlayThrough';
+
+        /**
          * Sent when playback completes.
          * @event MediaPlayerEvents#PLAYBACK_ENDED
          */
@@ -256,6 +286,13 @@ class MediaPlayerEvents extends EventsBase {
          * @event MediaPlayerEvents#PLAYBACK_METADATA_LOADED
          */
         this.PLAYBACK_METADATA_LOADED = 'playbackMetaDataLoaded';
+
+        /**
+         * The media's metadata has finished loading; all attributes now
+         * contain as much useful information as they're going to.
+         * @event MediaPlayerEvents#PLAYBACK_METADATA_LOADED
+         */
+        this.PLAYBACK_LOADED_DATA = 'playbackLoadedData';
 
         /**
          * Sent when playback is paused.
@@ -335,6 +372,30 @@ class MediaPlayerEvents extends EventsBase {
          * @event MediaPlayerEvents#MANIFEST_VALIDITY_CHANGED
          */
         this.MANIFEST_VALIDITY_CHANGED = 'manifestValidityChanged';
+
+        /**
+         * Dash events are triggered at their respective start points on the timeline.
+         * @event MediaPlayerEvents#EVENT_MODE_ON_START
+         */
+        this.EVENT_MODE_ON_START = 'eventModeOnStart';
+
+        /**
+         * Dash events are triggered as soon as they were parsed.
+         * @event MediaPlayerEvents#EVENT_MODE_ON_RECEIVE
+         */
+        this.EVENT_MODE_ON_RECEIVE = 'eventModeOnReceive';
+
+        /**
+         * Event that is dispatched whenever the player encounters a potential conformance validation that might lead to unexpected/not optimal behavior
+         * @event MediaPlayerEvents#CONFORMANCE_VIOLATION
+         */
+        this.CONFORMANCE_VIOLATION = 'conformanceViolation';
+
+        /**
+         * Event that is dispatched whenever the player switches to a different representation
+         * @event MediaPlayerEvents#REPRESENTATION_SWITCH
+         */
+        this.REPRESENTATION_SWITCH = 'representationSwitch';
     }
 }
 

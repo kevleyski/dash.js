@@ -15,6 +15,24 @@ const streamInfo = {
     id: 'id'
 };
 
+const sampleAdaptation = {
+    index: 0,
+    period: {
+        index: 0,
+        mpd: {
+            manifest: {
+                Period_asArray: [{
+                    AdaptationSet_asArray: [{
+                        Representation_asArray: [{
+                            SegmentTemplate: {}
+                        }]
+                    }]
+                }]
+            }
+        }
+    }
+};
+
 const sampleRepresentation = {
     id: 'rep_id',
     segmentInfoType: 'SegmentTemplate',
@@ -22,6 +40,8 @@ const sampleRepresentation = {
     width: 3200,
     height: 180,
     startNumber: 1,
+    adaptation: sampleAdaptation,
+    index: 0,
     segmentDuration: 100,
     timescale: 1,
     media: 'http://media/$RepresentationID$/$Number$.jpg',
@@ -38,6 +58,8 @@ const sampleRepresentation2 = {
     width: 1024,
     height: 1152,
     startNumber: 1,
+    adaptation: sampleAdaptation,
+    index: 0,
     segmentDuration: 634.566,
     timescale: 1,
     media: 'http://media/$RepresentationID$/$Number$.jpg',
@@ -54,6 +76,8 @@ const sampleRepresentation3 = {
     width: 1024,
     height: 1152,
     startNumber: 1,
+    adaptation: sampleAdaptation,
+    index: 0,
     segmentDuration: 634.566,
     timescale: 1,
     media: 'http://media/$RepresentationID$/$Number$.jpg',
@@ -74,6 +98,7 @@ describe('Thumbnails', function () {
                 streamInfo: streamInfo,
                 adapter: adapter,
                 baseURLController: objectsHelper.getDummyBaseURLController(),
+                timelineConverter: objectsHelper.getDummyTimelineConverter(),
                 debug: Debug(context).getInstance(),
                 eventBus: EventBus(context).getInstance(),
                 events: Events,
@@ -86,8 +111,9 @@ describe('Thumbnails', function () {
         });
 
         it('should return null if not initialized', function () {
-            const thumbnail = thumbnailController.get(0);
-            expect(thumbnail).to.be.null; // jshint ignore:line
+            thumbnailController.provide(0, (thumbnail) => {
+                expect(thumbnail).to.be.null; // jshint ignore:line
+            });
 
             expect(thumbnailController.getBitrateList()).to.be.empty; // jshint ignore:line
         });
@@ -104,11 +130,13 @@ describe('Thumbnails', function () {
                 streamInfo: streamInfo,
                 adapter: adapter,
                 baseURLController: objectsHelper.getDummyBaseURLController(),
+                timelineConverter: objectsHelper.getDummyTimelineConverter(),
                 debug: Debug(context).getInstance(),
                 eventBus: EventBus(context).getInstance(),
                 events: Events,
                 dashConstants: DashConstants
             });
+            thumbnailController.initialize();
         });
 
         afterEach(function () {
@@ -116,10 +144,11 @@ describe('Thumbnails', function () {
         });
 
         it('should return a thumbnail', function () {
-            let thumbnail = thumbnailController.get();
-            expect(thumbnail).to.be.null; // jshint ignore:line
+            thumbnailController.provide(undefined, thumbnail => {
+                expect(thumbnail).to.be.null; // jshint ignore:line
+            });
 
-            thumbnailController.get(0, thumbnail => {
+            thumbnailController.provide(0, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(0);
                 expect(thumbnail.y).to.equal(0);
@@ -128,7 +157,7 @@ describe('Thumbnails', function () {
                 expect(thumbnail.url).to.equal('http://media/rep_id/1.jpg');
             });
 
-            thumbnailController.get(11, thumbnail => {
+            thumbnailController.provide(11, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(320);
                 expect(thumbnail.y).to.equal(0);
@@ -137,7 +166,7 @@ describe('Thumbnails', function () {
                 expect(thumbnail.url).to.equal('http://media/rep_id/1.jpg');
             });
 
-            thumbnailController.get(101, thumbnail => {
+            thumbnailController.provide(101, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(0);
                 expect(thumbnail.y).to.equal(0);
@@ -149,7 +178,7 @@ describe('Thumbnails', function () {
 
         it('shouldn\'t return any thumbnail after reset', function () {
             thumbnailController.reset();
-            thumbnailController.get(0, thumbnail => {
+            thumbnailController.provide(0, thumbnail => {
                 expect(thumbnail).to.be.null; // jshint ignore:line
             });
         });
@@ -179,11 +208,13 @@ describe('Thumbnails', function () {
                 streamInfo: streamInfo,
                 adapter: adapter,
                 baseURLController: objectsHelper.getDummyBaseURLController(),
+                timelineConverter: objectsHelper.getDummyTimelineConverter(),
                 debug: Debug(context).getInstance(),
                 eventBus: EventBus(context).getInstance(),
                 events: Events,
                 dashConstants: DashConstants
             });
+            thumbnailController.initialize();
         });
 
         afterEach(function () {
@@ -191,7 +222,7 @@ describe('Thumbnails', function () {
         });
 
         it('should return a thumbnail when using multiple rows sprites ', function () {
-            thumbnailController.get(0, thumbnail => {
+            thumbnailController.provide(0, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(0);
                 expect(thumbnail.y).to.equal(0);
@@ -201,7 +232,7 @@ describe('Thumbnails', function () {
             });
 
 
-            thumbnailController.get(15, thumbnail => {
+            thumbnailController.provide(15, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(409.6);
                 expect(thumbnail.y).to.equal(0);
@@ -210,7 +241,7 @@ describe('Thumbnails', function () {
                 expect(thumbnail.url).to.equal('http://media/rep_id/1.jpg');
             });
 
-            thumbnailController.get(40, thumbnail => {
+            thumbnailController.provide(40, thumbnail => {
                 expect(thumbnail).to.be.not.null; // jshint ignore:line
                 expect(thumbnail.x).to.equal(204.8);
                 expect(thumbnail.y).to.equal(57.6);
@@ -231,6 +262,7 @@ describe('Thumbnails', function () {
                 streamInfo: streamInfo,
                 adapter: adapter,
                 baseURLController: objectsHelper.getDummyBaseURLController(),
+                timelineConverter: objectsHelper.getDummyTimelineConverter(),
                 debug: Debug(context).getInstance(),
                 eventBus: EventBus(context).getInstance(),
                 events: Events,
@@ -254,11 +286,13 @@ describe('Thumbnails', function () {
         });
 
         it('addTracks method doesn\'t add any track if config not set properly', function () {
-            thumbnailTracks = ThumbnailTracks(context).create({debug: Debug(context).getInstance(),
-                                                            eventBus: EventBus(context).getInstance(),
-                                                            events: Events,
-                                                            dashConstants: DashConstants});
-            thumbnailTracks.initialize();
+            thumbnailTracks = ThumbnailTracks(context).create({
+                streamInfo: streamInfo,
+                debug: Debug(context).getInstance(),
+                eventBus: EventBus(context).getInstance(),
+                events: Events,
+                dashConstants: DashConstants
+            });
             const tracks = thumbnailTracks.getTracks();
             expect(tracks).to.be.empty; // jshint ignore:line
         });
@@ -275,7 +309,7 @@ describe('Thumbnails', function () {
                 timescale: 1,
                 media: 'http://media/$RepresentationID$/$Number$.jpg'
             });
-            thumbnailTracks.initialize();
+            thumbnailTracks.addTracks();
             const tracks = thumbnailTracks.getTracks();
 
             expect(tracks).to.have.lengthOf(1);
@@ -290,7 +324,7 @@ describe('Thumbnails', function () {
 
         it('should parse representations and its essential properties', function () {
             adapter.setRepresentation(sampleRepresentation);
-            thumbnailTracks.initialize();
+            thumbnailTracks.addTracks();
             const tracks = thumbnailTracks.getTracks();
 
             expect(tracks).to.have.lengthOf(1);
@@ -305,7 +339,7 @@ describe('Thumbnails', function () {
 
         it('should empty tracks after a reset', function () {
             adapter.setRepresentation(sampleRepresentation);
-            thumbnailTracks.initialize();
+            thumbnailTracks.addTracks();
             expect(thumbnailTracks.getTracks()).to.have.lengthOf(1);
             thumbnailTracks.reset();
             expect(thumbnailTracks.getTracks()).to.have.lengthOf(0);
@@ -313,7 +347,7 @@ describe('Thumbnails', function () {
 
         it('tracks selection', function () {
             adapter.setRepresentation(sampleRepresentation);
-            thumbnailTracks.initialize();
+            thumbnailTracks.addTracks();
             thumbnailTracks.setTrackByIndex(0);
             expect(thumbnailTracks.getCurrentTrackIndex()).to.equal(0);
             expect(thumbnailTracks.getCurrentTrack()).to.be.not.null; // jshint ignore:line
@@ -348,7 +382,7 @@ describe('Thumbnails', function () {
         it('should support CR URI schema', function () {
             adapter.setRepresentation(sampleRepresentation3);
 
-            thumbnailTracks.initialize();
+            thumbnailTracks.addTracks();
             const tracks = thumbnailTracks.getTracks();
 
             expect(tracks[0].tilesHor).to.equal(50);

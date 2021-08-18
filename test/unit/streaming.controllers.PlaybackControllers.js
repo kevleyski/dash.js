@@ -7,11 +7,13 @@ import VideoModelMock from './mocks/VideoModelMock';
 import MediaPlayerModelMock from './mocks/MediaPlayerModelMock';
 import DashMetricsMock from './mocks/DashMetricsMock';
 import StreamControllerMock from './mocks/StreamControllerMock';
+import StreamMock from './mocks/StreamMock';
 import URIFragmentModelMock from './mocks/URIFragmentModelMock';
 import AdapterMock from './mocks/AdapterMock';
 
 const expect = require('chai').expect;
 const context = {};
+const sinon = require('sinon');
 
 const eventBus = EventBus(context).getInstance();
 
@@ -21,20 +23,22 @@ describe('PlaybackController', function () {
         videoModelMock,
         dashMetricsMock,
         mediaPlayerModelMock,
+        streamMock,
         streamControllerMock,
         uriFragmentModelMock,
         adapterMock,
         settings;
 
     beforeEach(function () {
+        settings = Settings(context).getInstance();
         videoModelMock = new VideoModelMock();
         dashMetricsMock = new DashMetricsMock();
-        mediaPlayerModelMock = new MediaPlayerModelMock();
+        mediaPlayerModelMock = new MediaPlayerModelMock({ settings });
+        streamMock = new StreamMock();
         streamControllerMock = new StreamControllerMock();
         uriFragmentModelMock = new URIFragmentModelMock();
         adapterMock = new AdapterMock();
         playbackController = PlaybackController(context).getInstance();
-        settings = Settings(context).getInstance();
 
         playbackController.setConfig({
             videoModel: videoModelMock,
@@ -45,6 +49,8 @@ describe('PlaybackController', function () {
             adapter: adapterMock,
             settings: settings
         });
+
+        streamControllerMock.initialize([streamMock]);
     });
 
     afterEach(function () {
@@ -56,7 +62,6 @@ describe('PlaybackController', function () {
         it('should initialize', function () {
 
             expect(playbackController.getIsDynamic()).to.not.exist; // jshint ignore:line
-            expect(playbackController.getLiveStartTime()).to.be.NaN; // jshint ignore:line
             expect(playbackController.isPaused()).to.be.null; // jshint ignore:line
             expect(playbackController.isSeeking()).to.be.null; // jshint ignore:line
             expect(playbackController.getTime()).to.be.null; // jshint ignore:line
@@ -73,10 +78,9 @@ describe('PlaybackController', function () {
             };
 
             playbackController.initialize(streamInfo);
-
+            streamMock.initialize(streamInfo);
 
             expect(playbackController.getIsDynamic()).to.equal(true);
-            expect(playbackController.getLiveStartTime()).to.equal(10);
         });
     });
 
@@ -88,16 +92,125 @@ describe('PlaybackController', function () {
                     isDynamic: true,
                     availableFrom: new Date()
                 },
-                start: 10
+                start: 10,
+                duration: 600
             };
 
             playbackController.initialize(streamInfo);
+            streamMock.initialize(streamInfo);
         });
 
         it('should return NaN when getLiveDelay is called after a call to computeLiveDelay with no parameter', function () {
-            expect(playbackController.computeLiveDelay.bind(playbackController)).not.to.throw();
+            expect(playbackController.computeAndSetLiveDelay.bind(playbackController)).not.to.throw();
             expect(playbackController.getLiveDelay()).to.be.NaN; // jshint ignore:line
         });
+
+        describe('computeAndSetLiveDelay()', function () {
+            let manifestInfo;
+
+            beforeEach(function () {
+                settings.reset();
+                manifestInfo = {}
+            })
+
+            it('should return NaN if no values specified', function () {
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.be.NaN;
+            })
+
+            it('should return live delay if specified in the settings', function () {
+                settings.update({ streaming: { delay: { liveDelay: 20 } } });
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.equal(20);
+            })
+
+            it('should return live delay based on liveDelayFragmentCount if specified in the settings', function () {
+                settings.update({ streaming: { delay: { liveDelayFragmentCount: 5 } } });
+                const liveDelay = playbackController.computeAndSetLiveDelay(2, manifestInfo);
+
+                expect(liveDelay).to.equal(10);
+            })
+
+            it('should return live delay based on suggestedPresentationDelay', function () {
+                const adapterStub = sinon.stub(adapterMock, 'getSuggestedPresentationDelay').returns(12);
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.equal(12);
+                adapterStub.restore();
+            })
+
+            it('should return live delay based on fragment duration and FRAGMENT_DURATION_FACTOR', function () {
+                const liveDelay = playbackController.computeAndSetLiveDelay(2, manifestInfo);
+
+                expect(liveDelay).to.equal(8);
+            })
+
+            it('should return live delay based on minBufferTime', function () {
+                manifestInfo.minBufferTime = 8;
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.equal(32);
+            })
+
+            it('should prefer live delay based on liveDelay if both liveDelay and liveDelayFragmentCount are specified in the settings', function () {
+                settings.update({ streaming: { delay: { liveDelayFragmentCount: 5, liveDelay: 40 } } });
+                const liveDelay = playbackController.computeAndSetLiveDelay(2, manifestInfo);
+
+                expect(liveDelay).to.equal(40);
+            })
+
+            it('should return live delay based on ServiceDescription if correct scheme id is specified', function () {
+                manifestInfo.serviceDescriptions = [{
+                    schemeIdUri: 'urn:dvb:dash:lowlatency:scope:2019',
+                    latency: {
+                        target: 13000
+                    }
+                }]
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.equal(13);
+            })
+
+            it('should ignore live delay based on ServiceDescription if wrong scheme id is specified', function () {
+                manifestInfo.serviceDescriptions = [{
+                    schemeIdUri: 'urn:dvb:dash:somescheme',
+                    latency: {
+                        target: 13000
+                    }
+                }]
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.be.NaN
+            })
+
+            it('should not apply live delay based on ServiceDescription if live delay is already defined', function () {
+                settings.update({ streaming: { delay: { liveDelay: 20 } } });
+                manifestInfo.serviceDescriptions = [{
+                    schemeIdUri: 'urn:dvb:dash:lowlatency:scope:2019',
+                    latency: {
+                        target: 13000
+                    }
+                }]
+                const liveDelay = playbackController.computeAndSetLiveDelay(NaN, manifestInfo);
+
+                expect(liveDelay).to.equal(20);
+            })
+
+            it('should not apply live delay based on ServiceDescription if liveDelayFragmentCount is already defined', function () {
+                settings.update({ streaming: { delay: { liveDelayFragmentCount: 5 } } });
+                manifestInfo.serviceDescriptions = [{
+                    schemeIdUri: 'urn:dvb:dash:lowlatency:scope:2019',
+                    latency: {
+                        target: 13000
+                    }
+                }]
+                const liveDelay = playbackController.computeAndSetLiveDelay(2, manifestInfo);
+
+                expect(liveDelay).to.equal(10);
+            })
+        })
 
         describe('video management', function () {
 
@@ -162,13 +275,6 @@ describe('PlaybackController', function () {
             it('should return video ended ', function () {
                 videoModelMock.ended = true;
                 expect(playbackController.getEnded()).to.equal(videoModelMock.ended);
-            });
-
-            it('getStartTimeFromUriParameters should return the expected value', function () {
-                uriFragmentModelMock.setURIFragmentData({t: 18.2});
-                const uriParameters = playbackController.getStartTimeFromUriParameters();
-                expect(uriParameters.fragT).to.exist; // jshint ignore:line
-                expect(uriParameters.fragT).to.equal(18.2);
             });
         });
 
@@ -295,7 +401,7 @@ describe('PlaybackController', function () {
                 };
 
                 eventBus.on(Events.PLAYBACK_ERROR, onError, this);
-                videoModelMock.fireEvent('error', [{target: { error: 'error'}}]);
+                videoModelMock.fireEvent('error', [{ target: { error: 'error' } }]);
             });
 
             it('should handle stalled event', function (done) {
@@ -328,6 +434,5 @@ describe('PlaybackController', function () {
                 videoModelMock.fireEvent('waiting');
             });
         });
-
     });
 });

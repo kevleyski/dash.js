@@ -136,6 +136,12 @@ class ProtectionEvents extends EventsBase {
         this.LICENSE_REQUEST_COMPLETE = 'public_licenseRequestComplete';
 
         /**
+         * Sending a license rquest
+         * @event ProtectionEvents#LICENSE_REQUEST_SENDING
+         */
+        this.LICENSE_REQUEST_SENDING = 'public_licenseRequestSending';
+
+        /**
          * Event ID for needkey/encrypted events
          * @ignore
          */
@@ -173,6 +179,12 @@ class ProtectionEvents extends EventsBase {
          * @ignore
          */
         this.VIDEO_ELEMENT_SELECTED = 'videoElementSelected';
+
+        /**
+         * Triggered when the key session has been updated successfully
+         * @ignore
+         */
+        this.KEY_SESSION_UPDATED = 'public_keySessionUpdated';
     }
 }
 

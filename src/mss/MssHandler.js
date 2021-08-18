@@ -36,21 +36,21 @@ import MssFragmentProcessor from './MssFragmentProcessor';
 import MssParser from './parser/MssParser';
 import MssErrors from './errors/MssErrors';
 import DashJSError from '../streaming/vo/DashJSError';
-import InitCache from '../streaming/utils/InitCache';
+import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
 
 function MssHandler(config) {
 
     config = config || {};
-    let context = this.context;
-    let eventBus = config.eventBus;
+    const context = this.context;
+    const eventBus = config.eventBus;
     const events = config.events;
     const constants = config.constants;
     const initSegmentType = config.initSegmentType;
-    let dashMetrics = config.dashMetrics;
-    let playbackController = config.playbackController;
-    let streamController = config.streamController;
-    let protectionController = config.protectionController;
-    let mssFragmentProcessor = MssFragmentProcessor(context).create({
+    const dashMetrics = config.dashMetrics;
+    const playbackController = config.playbackController;
+    const streamController = config.streamController;
+    const protectionController = config.protectionController;
+    const mssFragmentProcessor = MssFragmentProcessor(context).create({
         dashMetrics: dashMetrics,
         playbackController: playbackController,
         protectionController: protectionController,
@@ -63,12 +63,10 @@ function MssHandler(config) {
     });
     let mssParser,
         fragmentInfoControllers,
-        initCache,
         instance;
 
     function setup() {
         fragmentInfoControllers = [];
-        initCache = InitCache(context).getInstance();
     }
 
     function getStreamProcessor(type) {
@@ -102,12 +100,12 @@ function MssHandler(config) {
 
     function startFragmentInfoControllers() {
 
-        // Create MssFragmentInfoControllers for each StreamProcessor of active stream (only for audio, video or fragmentedText)
+        // Create MssFragmentInfoControllers for each StreamProcessor of active stream (only for audio, video or text)
         let processors = streamController.getActiveStreamProcessors();
         processors.forEach(function (processor) {
             if (processor.getType() === constants.VIDEO ||
                 processor.getType() === constants.AUDIO ||
-                processor.getType() === constants.FRAGMENTED_TEXT) {
+                processor.getType() === constants.TEXT) {
 
                 let fragmentInfoController = getFragmentInfoController(processor.getType());
                 if (!fragmentInfoController) {
@@ -132,7 +130,7 @@ function MssHandler(config) {
     }
 
     function onInitFragmentNeeded(e) {
-        let streamProcessor = getStreamProcessor(e.sender.getType());
+        let streamProcessor = getStreamProcessor(e.mediaType);
         if (!streamProcessor) return;
 
         // Create init segment request
@@ -155,9 +153,10 @@ function MssHandler(config) {
             chunk.bytes = mssFragmentProcessor.generateMoov(representation);
 
             // Notify init segment has been loaded
-            eventBus.trigger(events.INIT_FRAGMENT_LOADED, {
-                chunk: chunk
-            });
+            eventBus.trigger(events.INIT_FRAGMENT_LOADED,
+                { chunk: chunk },
+                { streamId: mediaInfo.streamInfo.id, mediaType: representation.adaptation.type }
+            );
         } catch (e) {
             config.errHandler.error(new DashJSError(e.code, e.message, e.data));
         }
@@ -175,7 +174,7 @@ function MssHandler(config) {
         // Process moof to transcode it from MSS to DASH (or to update segment timeline for SegmentInfo fragments)
         mssFragmentProcessor.processFragment(e, streamProcessor);
 
-        if (e.request.type === 'FragmentInfoSegment') {
+        if (e.request.type === HTTPRequest.MSS_FRAGMENT_INFO_SEGMENT_TYPE) {
             // If FragmentInfo loaded, then notify corresponding MssFragmentInfoController
             let fragmentInfoController = getFragmentInfoController(e.request.mediaType);
             if (fragmentInfoController) {
@@ -211,14 +210,19 @@ function MssHandler(config) {
     }
 
     function registerEvents() {
-        eventBus.on(events.INIT_FRAGMENT_NEEDED, onInitFragmentNeeded, instance, dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH); /* jshint ignore:line */
-        eventBus.on(events.PLAYBACK_PAUSED, onPlaybackPaused, instance, dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH); /* jshint ignore:line */
-        eventBus.on(events.PLAYBACK_SEEK_ASKED, onPlaybackSeekAsked, instance, dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH); /* jshint ignore:line */
-        eventBus.on(events.FRAGMENT_LOADING_COMPLETED, onSegmentMediaLoaded, instance, dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH); /* jshint ignore:line */
+        eventBus.on(events.INIT_FRAGMENT_NEEDED, onInitFragmentNeeded, instance, { priority: dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH }); /* jshint ignore:line */
+        eventBus.on(events.PLAYBACK_PAUSED, onPlaybackPaused, instance, { priority: dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH }); /* jshint ignore:line */
+        eventBus.on(events.PLAYBACK_SEEK_ASKED, onPlaybackSeekAsked, instance, { priority: dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH }); /* jshint ignore:line */
+        eventBus.on(events.FRAGMENT_LOADING_COMPLETED, onSegmentMediaLoaded, instance, { priority: dashjs.FactoryMaker.getSingletonFactoryByName(eventBus.getClassName()).EVENT_PRIORITY_HIGH }); /* jshint ignore:line */
         eventBus.on(events.TTML_TO_PARSE, onTTMLPreProcess, instance);
     }
 
     function reset() {
+        if (mssParser) {
+            mssParser.reset();
+            mssParser = undefined;
+        }
+
         eventBus.off(events.INIT_FRAGMENT_NEEDED, onInitFragmentNeeded, this);
         eventBus.off(events.PLAYBACK_PAUSED, onPlaybackPaused, this);
         eventBus.off(events.PLAYBACK_SEEK_ASKED, onPlaybackSeekAsked, this);

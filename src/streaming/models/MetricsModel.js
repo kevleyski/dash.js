@@ -31,13 +31,13 @@
 import Constants from '../constants/Constants';
 import MetricsConstants from '../constants/MetricsConstants';
 import MetricsList from '../vo/MetricsList';
-import { HTTPRequest, HTTPRequestTrace } from '../vo/metrics/HTTPRequest';
+import {HTTPRequest, HTTPRequestTrace} from '../vo/metrics/HTTPRequest';
 import TrackSwitch from '../vo/metrics/RepresentationSwitch';
 import BufferLevel from '../vo/metrics/BufferLevel';
 import BufferState from '../vo/metrics/BufferState';
 import DVRInfo from '../vo/metrics/DVRInfo';
 import DroppedFrames from '../vo/metrics/DroppedFrames';
-import { ManifestUpdate, ManifestUpdateStreamInfo, ManifestUpdateRepresentationInfo } from '../vo/metrics/ManifestUpdate';
+import {ManifestUpdate, ManifestUpdateStreamInfo, ManifestUpdateRepresentationInfo} from '../vo/metrics/ManifestUpdate';
 import SchedulingInfo from '../vo/metrics/SchedulingInfo';
 import EventBus from '../../core/EventBus';
 import RequestsQueue from '../vo/metrics/RequestsQueue';
@@ -65,17 +65,17 @@ function MetricsModel(config) {
     }
 
     function metricChanged(mediaType) {
-        eventBus.trigger(Events.METRIC_CHANGED, {mediaType: mediaType});
+        eventBus.trigger(Events.METRIC_CHANGED, { mediaType: mediaType });
         metricsChanged();
     }
 
     function metricUpdated(mediaType, metricType, vo) {
-        eventBus.trigger(Events.METRIC_UPDATED, {mediaType: mediaType, metric: metricType, value: vo});
+        eventBus.trigger(Events.METRIC_UPDATED, { mediaType: mediaType, metric: metricType, value: vo });
         metricChanged(mediaType);
     }
 
     function metricAdded(mediaType, metricType, vo) {
-        eventBus.trigger(Events.METRIC_ADDED, {mediaType: mediaType, metric: metricType, value: vo});
+        eventBus.trigger(Events.METRIC_ADDED, { mediaType: mediaType, metric: metricType, value: vo });
         metricChanged(mediaType);
     }
 
@@ -110,18 +110,19 @@ function MetricsModel(config) {
         let metrics = getMetricsFor(type);
         if (metrics !== null) {
             metrics[list].push(value);
-            if ( metrics[list].length > settings.get().streaming.metricsMaxListDepth ) {
+            if (metrics[list].length > settings.get().streaming.metrics.maxListDepth) {
                 metrics[list].shift();
             }
         }
     }
 
-    function appendHttpTrace(httpRequest, s, d, b) {
+    function appendHttpTrace(httpRequest, s, d, b, t) {
         let vo = new HTTPRequestTrace();
 
         vo.s = s;
         vo.d = d;
         vo.b = b;
+        vo.t = t;
 
         httpRequest.trace.push(vo);
 
@@ -185,7 +186,7 @@ function MetricsModel(config) {
 
         if (traces) {
             traces.forEach(trace => {
-                appendHttpTrace(vo, trace.s, trace.d, trace.b);
+                appendHttpTrace(vo, trace.s, trace.d, trace.b, trace.t);
             });
         } else {
             // The interval and trace shall be absent for redirect and failure records.
@@ -235,7 +236,7 @@ function MetricsModel(config) {
 
     function addDVRInfo(mediaType, currentTime, mpd, range) {
         let vo = new DVRInfo();
-        vo.time = currentTime ;
+        vo.time = currentTime;
         vo.range = range;
         vo.manifestInfo = mpd;
 

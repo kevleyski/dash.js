@@ -20,11 +20,11 @@ import MediaControllerMock from './mocks/MediaControllerMock';
 import DashMetricsMock from './mocks/DashMetricsMock';
 import TextControllerMock from './mocks/TextControllerMock';
 import VideoModelMock from './mocks/VideoModelMock';
+import ProtectionControllerMock from './mocks/ProtectionControllerMock';
 
 import ObjectsHelper from './helpers/ObjectsHelper';
 
 const expect = require('chai').expect;
-const sinon = require('sinon');
 
 const context = {};
 const eventBus = EventBus(context).getInstance();
@@ -45,6 +45,7 @@ describe('Stream', function () {
     const dashMetricsMock = new DashMetricsMock();
     const textControllerMock = new TextControllerMock();
     const videoModelMock = new VideoModelMock();
+    const protectionControllerMock = new ProtectionControllerMock();
     const timelineConverter = objectsHelper.getDummyTimelineConverter();
     const streamInfo = {
         id: 'id',
@@ -58,6 +59,7 @@ describe('Stream', function () {
     describe('Well initialized', function () {
         beforeEach(function () {
             stream = Stream(context).create({
+                streamInfo: streamInfo,
                 errHandler: errHandlerMock,
                 manifestModel: manifestModelMock,
                 adapter: adapterMock,
@@ -69,8 +71,10 @@ describe('Stream', function () {
                 timelineConverter: timelineConverter,
                 dashMetrics: dashMetricsMock,
                 textController: textControllerMock,
+                protectionController: protectionControllerMock,
                 videoModel: videoModelMock,
-                settings: settings});
+                settings: settings
+            });
         });
 
         afterEach(function () {
@@ -78,7 +82,7 @@ describe('Stream', function () {
         });
 
         it('should return false when isActive is called', () => {
-            const isActive = stream.isActive();
+            const isActive = stream.getIsActive();
 
             expect(isActive).to.be.false; // jshint ignore:line
         });
@@ -96,179 +100,145 @@ describe('Stream', function () {
         });
 
         it('should return an null when getId is called but streamInfo attribute is null or undefined', () => {
+            stream.reset();
             const id = stream.getId();
-
             expect(id).to.be.null; // jshint ignore:line
         });
 
         it('should return an NaN when getStartTime is called but streamInfo attribute is null or undefined', () => {
+            stream.reset();
             const startTime = stream.getStartTime();
-
             expect(startTime).to.be.NaN; // jshint ignore:line
         });
 
         it('should return an NaN when getDuration is called but streamInfo attribute is null or undefined', () => {
+            stream.reset();
             const duration = stream.getDuration();
-
             expect(duration).to.be.NaN; // jshint ignore:line
         });
 
         it('should return null false isMediaCodecCompatible is called but stream attribute is undefined', () => {
+            stream.reset();
             const isCompatible = stream.isMediaCodecCompatible();
-
             expect(isCompatible).to.be.false; // jshint ignore:line
         });
 
         it('should return false when isMediaCodecCompatible is called but stream attribute is an empty object', () => {
+            stream.reset();
             const isCompatible = stream.isMediaCodecCompatible({});
-
             expect(isCompatible).to.be.false; // jshint ignore:line
         });
 
         it('should return false when isMediaCodecCompatible is called with a correct stream attribute', () => {
+            stream.reset();
             const isCompatible = stream.isMediaCodecCompatible(new StreamMock());
-
             expect(isCompatible).to.be.false; // jshint ignore:line
         });
 
-        it('should return null when isProtectionCompatible is called but stream attribute is undefined', () => {
+        it('should return true when isProtectionCompatible is called but new stream attribute is undefined', () => {
+            stream.reset();
             const isCompatible = stream.isProtectionCompatible();
-
-            expect(isCompatible).to.be.false; // jshint ignore:line
+            expect(isCompatible).to.be.true; // jshint ignore:line
         });
 
         it('should return an empty array when getBitrateListFor is called but no stream processor is defined', () => {
+            stream.reset();
             const bitrateList = stream.getBitrateListFor('');
-
             expect(bitrateList).to.be.instanceOf(Array); // jshint ignore:line
             expect(bitrateList).to.be.empty; // jshint ignore:line
         });
 
         it('should return an empty array when getBitrateListFor, for image type, is called but thumbnailController is not defined', () => {
+            stream.reset();
             const bitrateList = stream.getBitrateListFor(Constants.IMAGE);
-
             expect(bitrateList).to.be.instanceOf(Array); // jshint ignore:line
             expect(bitrateList).to.be.empty; // jshint ignore:line
         });
 
-        it('should not call STREAM_INITIALIZED event if initializeMedia has not been called when updateData is called', () => {
-            const spy = sinon.spy();
-
-            eventBus.on(Events.STREAM_INITIALIZED, spy);
-
-            stream.updateData(streamInfo);
-
-            expect(spy.notCalled).to.be.true; // jshint ignore:line
-
-            eventBus.off(Events.STREAM_INITIALIZED, spy);
-        });
-
         it('License expired behavior', function () {
-            stream.initialize(null,{});
+            stream.initialize();
 
-            eventBus.trigger(Events.KEY_STATUSES_CHANGED, {data: null, error: new DashJSError(ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_CODE, ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_MESSAGE)});
+            eventBus.trigger(Events.KEY_STATUSES_CHANGED, {
+                data: null,
+                error: new DashJSError(ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_CODE, ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_MESSAGE)
+            });
 
             expect(errHandlerMock.errorCode).to.be.equal(ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_CODE); // jshint ignore:line
             expect(errHandlerMock.errorValue).to.be.equal(ProtectionErrors.KEY_STATUS_CHANGED_EXPIRED_ERROR_MESSAGE); // jshint ignore:line
         });
 
         it('No Licenser server url defined behavior', function () {
-            stream.initialize(null,{});
+            stream.initialize();
 
-            eventBus.trigger(Events.LICENSE_REQUEST_COMPLETE, {data: null, error: new DashJSError(ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_CODE, ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_MESSAGE)});
+            eventBus.trigger(Events.LICENSE_REQUEST_COMPLETE, {
+                data: null,
+                error: new DashJSError(ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_CODE, ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_MESSAGE)
+            });
 
             expect(errHandlerMock.errorCode).to.be.equal(ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_CODE); // jshint ignore:line
             expect(errHandlerMock.errorValue).to.be.equal(ProtectionErrors.MEDIA_KEY_MESSAGE_NO_LICENSE_SERVER_URL_ERROR_MESSAGE); // jshint ignore:line
         });
 
         it('Licenser request error behavior', function () {
-            stream.initialize(null,{});
+            stream.initialize();
 
-            eventBus.trigger(Events.LICENSE_REQUEST_COMPLETE, {data: null, error: new DashJSError(ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_CODE, ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_MESSAGE)});
+            eventBus.trigger(Events.LICENSE_REQUEST_COMPLETE, {
+                data: null,
+                error: new DashJSError(ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_CODE, ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_MESSAGE)
+            });
 
             expect(errHandlerMock.errorCode).to.be.equal(ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_CODE); // jshint ignore:line
             expect(errHandlerMock.errorValue).to.be.equal(ProtectionErrors.MEDIA_KEY_MESSAGE_LICENSER_ERROR_MESSAGE); // jshint ignore:line
         });
 
         it('CDM Access denied behavior', function () {
-            stream.initialize(null,{});
+            stream.initialize();
 
-            eventBus.trigger(Events.KEY_SYSTEM_SELECTED, {data: null, error: new DashJSError(ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_CODE, ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_MESSAGE)});
+            eventBus.trigger(Events.KEY_SYSTEM_SELECTED, {
+                data: null,
+                error: new DashJSError(ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_CODE, ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_MESSAGE)
+            });
 
             expect(errHandlerMock.errorCode).to.be.equal(ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_CODE); // jshint ignore:line
             expect(errHandlerMock.errorValue).to.be.equal(ProtectionErrors.KEY_SYSTEM_ACCESS_DENIED_ERROR_MESSAGE); // jshint ignore:line
         });
 
         it('Unable to create key session behavior', function () {
-            stream.initialize(null,{});
+            stream.initialize();
 
-            eventBus.trigger(Events.KEY_SESSION_CREATED, {data: null, error: new DashJSError(ProtectionErrors.KEY_SESSION_CREATED_ERROR_CODE, ProtectionErrors.KEY_SESSION_CREATED_ERROR_MESSAGE)});
+            eventBus.trigger(Events.KEY_SESSION_CREATED, {
+                data: null,
+                error: new DashJSError(ProtectionErrors.KEY_SESSION_CREATED_ERROR_CODE, ProtectionErrors.KEY_SESSION_CREATED_ERROR_MESSAGE)
+            });
 
             expect(errHandlerMock.errorCode).to.be.equal(ProtectionErrors.KEY_SESSION_CREATED_ERROR_CODE); // jshint ignore:line
             expect(errHandlerMock.errorValue).to.be.equal(ProtectionErrors.KEY_SESSION_CREATED_ERROR_MESSAGE); // jshint ignore:line
         });
 
-        it('should return preloaded to true after a call to preload without parameters', () => {
-            stream.initialize(streamInfo, {});
+        it('should return preloaded to true after a call to preload without parameters', (done) => {
+            stream.initialize();
 
             let isPreloaded = stream.getPreloaded();
 
             expect(isPreloaded).to.be.false; // jshint ignore:line
 
-            stream.preload();
-
-            isPreloaded = stream.getPreloaded();
-
-            expect(isPreloaded).to.be.true; // jshint ignore:line
+            stream.startPreloading()
+                .then(() => {
+                    isPreloaded = stream.getPreloaded();
+                    expect(isPreloaded).to.be.true; // jshint ignore:line
+                    done();
+                })
+                .catch((e) => {
+                    done(e);
+                });
         });
 
         it('should return undefined when getThumbnailController is called without a call to initializeMediaForType', () => {
-            stream.initialize(streamInfo, {});
+            stream.initialize();
 
             const thumbnailController = stream.getThumbnailController();
 
             expect(thumbnailController).to.be.undefined; // jshint ignore:line
-        });
-
-        // it('should returns an array of buffers when activate is called', function () {
-        //     stream.initialize(streamInfo, {});
-
-        //     const buffers = stream.activate();
-
-        //     expect(buffers).to.be.instanceOf(Object); // jshint ignore:line
-        //     expect(buffers).to.not.equal({}); // jshint ignore:line
-        // });
-    });
-
-    describe('Not well initialized with no config parameter', function () {
-        beforeEach(function () {
-            stream = Stream(context).create();
-        });
-
-        afterEach(function () {
-            stream.reset();
-        });
-
-        it('should throw an error when getBitrateListFor is called and config object is not defined', function () {
-            expect(stream.getBitrateListFor.bind(stream)).to.be.throw(Constants.MISSING_CONFIG_ERROR);
-        });
-    });
-
-    describe('Not well initialized with empty config parameter', function () {
-        beforeEach(function () {
-            stream = Stream(context).create({});
-        });
-
-        afterEach(function () {
-            stream.reset();
-        });
-
-        it('should throw an error when getBitrateListFor is called and config object has not been set properly', function () {
-            expect(stream.getBitrateListFor.bind(stream)).to.be.throw(Constants.MISSING_CONFIG_ERROR);
-        });
-
-        it('should throw an error when activate is called and config object has not been set properly', function () {
-            expect(stream.activate.bind(stream)).to.be.throw(Constants.MISSING_CONFIG_ERROR);
         });
     });
 });

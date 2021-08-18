@@ -30,20 +30,25 @@
  */
 import EventBus from '../core/EventBus';
 import Events from '../core/events/Events';
+import MediaPlayerEvents from '../streaming/MediaPlayerEvents';
 import FactoryMaker from '../core/FactoryMaker';
 import Debug from '../core/Debug';
 import Errors from '../core/errors/Errors';
+import DashConstants from '../dash/constants/DashConstants';
+import URLUtils from './utils/URLUtils';
 
 function ManifestUpdater() {
 
     const context = this.context;
     const eventBus = EventBus(context).getInstance();
+    const urlUtils = URLUtils(context).getInstance();
 
     let instance,
         logger,
         refreshDelay,
         refreshTimer,
         isPaused,
+        isStopped,
         isUpdating,
         manifestLoader,
         manifestModel,
@@ -79,8 +84,8 @@ function ManifestUpdater() {
         resetInitialSettings();
 
         eventBus.on(Events.STREAMS_COMPOSED, onStreamsComposed, this);
-        eventBus.on(Events.PLAYBACK_STARTED, onPlaybackStarted, this);
-        eventBus.on(Events.PLAYBACK_PAUSED, onPlaybackPaused, this);
+        eventBus.on(MediaPlayerEvents.PLAYBACK_STARTED, onPlaybackStarted, this);
+        eventBus.on(MediaPlayerEvents.PLAYBACK_PAUSED, onPlaybackPaused, this);
         eventBus.on(Events.INTERNAL_MANIFEST_LOADED, onManifestLoaded, this);
     }
 
@@ -92,13 +97,14 @@ function ManifestUpdater() {
         refreshDelay = NaN;
         isUpdating = false;
         isPaused = true;
+        isStopped = false;
         stopManifestRefreshTimer();
     }
 
     function reset() {
 
-        eventBus.off(Events.PLAYBACK_STARTED, onPlaybackStarted, this);
-        eventBus.off(Events.PLAYBACK_PAUSED, onPlaybackPaused, this);
+        eventBus.off(MediaPlayerEvents.PLAYBACK_STARTED, onPlaybackStarted, this);
+        eventBus.off(MediaPlayerEvents.PLAYBACK_PAUSED, onPlaybackPaused, this);
         eventBus.off(Events.STREAMS_COMPOSED, onStreamsComposed, this);
         eventBus.off(Events.INTERNAL_MANIFEST_LOADED, onManifestLoaded, this);
 
@@ -115,6 +121,10 @@ function ManifestUpdater() {
     function startManifestRefreshTimer(delay) {
         stopManifestRefreshTimer();
 
+        if (isStopped) {
+            return;
+        }
+
         if (isNaN(delay) && !isNaN(refreshDelay)) {
             delay = refreshDelay * 1000;
         }
@@ -125,18 +135,79 @@ function ManifestUpdater() {
         }
     }
 
-    function refreshManifest() {
+    function refreshManifest(ignorePatch = false) {
         isUpdating = true;
         const manifest = manifestModel.getValue();
+
+        // default to the original url in the manifest
         let url = manifest.url;
+
+        // Check for PatchLocation and Location alternatives
+        const patchLocation = adapter.getPatchLocation(manifest);
         const location = adapter.getLocation(manifest);
-        if (location) {
+        if (patchLocation && !ignorePatch) {
+            url = patchLocation;
+        } else if (location) {
             url = location;
         }
+
+        // if one of the alternatives was relative, convert to absolute
+        if (urlUtils.isRelative(url)) {
+            url = urlUtils.resolve(url, manifest.url);
+        }
+
         manifestLoader.load(url);
     }
 
     function update(manifest) {
+        if (!manifest) {
+            // successful update with no content implies existing manifest remains valid
+            manifest = manifestModel.getValue();
+
+            // override load time to avoid invalid latency tracking and ensure update cadence
+            manifest.loadedTime = new Date();
+        } else if (adapter.getIsPatch(manifest)) {
+            // with patches the in-memory manifest is our base
+            let patch = manifest;
+            manifest = manifestModel.getValue();
+
+            // check for patch validity
+            let isPatchValid = adapter.isPatchValid(manifest, patch);
+            let patchSuccessful = isPatchValid;
+
+            if (isPatchValid) {
+                // grab publish time before update
+                let publishTime = adapter.getPublishTime(manifest);
+
+                // apply validated patch to manifest
+                patchSuccessful = adapter.applyPatchToManifest(manifest, patch);
+
+                // get the updated publish time
+                let updatedPublishTime = adapter.getPublishTime(manifest);
+
+                // ensure the patch properly updated the in-memory publish time
+                patchSuccessful = publishTime.getTime() != updatedPublishTime.getTime();
+            }
+
+            // if the patch failed to apply, force a full manifest refresh
+            if (!patchSuccessful) {
+                logger.debug('Patch provided is invalid, performing full manifest refresh');
+                refreshManifest(true);
+                return;
+            }
+
+            // override load time to avoid invalid latency tracking and ensure update cadence
+            manifest.loadedTime = new Date();
+        }
+
+        // See DASH-IF IOP v4.3 section 4.6.4 "Transition Phase between Live and On-Demand"
+        // Stop manifest update, ignore static manifest and signal end of dynamic stream to detect end of stream
+        if (manifestModel.getValue() && manifestModel.getValue().type === DashConstants.DYNAMIC && manifest.type === DashConstants.STATIC) {
+            eventBus.trigger(Events.DYNAMIC_TO_STATIC);
+            isUpdating = false;
+            isStopped = true;
+            return;
+        }
 
         manifestModel.setValue(manifest);
 
@@ -148,7 +219,7 @@ function ManifestUpdater() {
         if (refreshDelay * 1000 > 0x7FFFFFFF) {
             refreshDelay = 0x7FFFFFFF / 1000;
         }
-        eventBus.trigger(Events.MANIFEST_UPDATED, {manifest: manifest});
+        eventBus.trigger(Events.MANIFEST_UPDATED, { manifest: manifest });
         logger.info('Manifest has been refreshed at ' + date + '[' + date.getTime() / 1000 + '] ');
 
         if (!isPaused) {
@@ -157,7 +228,7 @@ function ManifestUpdater() {
     }
 
     function onRefreshTimer() {
-        if (isPaused && !settings.get().streaming.scheduleWhilePaused) {
+        if (isPaused) {
             return;
         }
         if (isUpdating) {
@@ -181,8 +252,11 @@ function ManifestUpdater() {
     }
 
     function onPlaybackPaused(/*e*/) {
-        isPaused = true;
-        stopManifestRefreshTimer();
+        isPaused = !settings.get().streaming.scheduling.scheduleWhilePaused;
+
+        if (isPaused) {
+            stopManifestRefreshTimer();
+        }
     }
 
     function onStreamsComposed(/*e*/) {

@@ -42,6 +42,7 @@ function FragmentLoader(config) {
     const events = config.events;
     const urlUtils = config.urlUtils;
     const errors = config.errors;
+    const streamId = config.streamId;
 
     let instance,
         urlLoader;
@@ -57,14 +58,14 @@ function FragmentLoader(config) {
             urlUtils: urlUtils,
             constants: Constants,
             boxParser: config.boxParser,
-            dashConstants: config.dashConstants
+            dashConstants: config.dashConstants,
+            requestTimeout: config.settings.get().streaming.fragmentRequestTimeout
         });
     }
 
     function checkForExistence(request) {
         const report = function (success) {
-            eventBus.trigger(
-                events.CHECK_FOR_EXISTENCE_COMPLETED, {
+            eventBus.trigger(events.CHECK_FOR_EXISTENCE_COMPLETED, {
                     request: request,
                     exists: success
                 }
@@ -103,7 +104,8 @@ function FragmentLoader(config) {
                 progress: function (event) {
                     eventBus.trigger(events.LOADING_PROGRESS, {
                         request: request,
-                        stream: event.stream
+                        stream: event.stream,
+                        streamId
                     });
                     if (event.data) {
                         eventBus.trigger(events.LOADING_DATA_PROGRESS, {
@@ -129,7 +131,11 @@ function FragmentLoader(config) {
                 },
                 abort: function (request) {
                     if (request) {
-                        eventBus.trigger(events.LOADING_ABANDONED, {request: request, mediaType: request.mediaType, sender: instance});
+                        eventBus.trigger(events.LOADING_ABANDONED, {
+                            mediaType: request.mediaType,
+                            request: request,
+                            sender: instance
+                        });
                     }
                 }
             });

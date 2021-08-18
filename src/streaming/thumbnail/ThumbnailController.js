@@ -34,11 +34,12 @@ import Constants from '../constants/Constants';
 import Thumbnail from '../vo/Thumbnail';
 import ThumbnailTracks from './ThumbnailTracks';
 import BitrateInfo from '../vo/BitrateInfo';
-import { replaceTokenForTemplate, unescapeDollarsInTemplate } from '../../dash/utils/SegmentsUtils';
+import {replaceTokenForTemplate, unescapeDollarsInTemplate} from '../../dash/utils/SegmentsUtils';
 
 function ThumbnailController(config) {
 
     const context = this.context;
+    const streamInfo = config.streamInfo;
 
     let instance,
         thumbnailTracks;
@@ -46,31 +47,48 @@ function ThumbnailController(config) {
     function setup() {
         reset();
         thumbnailTracks = ThumbnailTracks(context).create({
-            streamInfo: config.streamInfo,
+            streamInfo: streamInfo,
             adapter: config.adapter,
             baseURLController: config.baseURLController,
             timelineConverter: config.timelineConverter,
             debug: config.debug,
             eventBus: config.eventBus,
             events: config.events,
-            dashConstants: config.dashConstants
+            dashConstants: config.dashConstants,
+            dashMetrics: config.dashMetrics,
+            segmentBaseController: config.segmentBaseController
         });
     }
 
-    function getThumbnail(time, callback) {
+    function initialize() {
+        thumbnailTracks.addTracks();
+        const tracks = thumbnailTracks.getTracks();
+
+        if (tracks && tracks.length > 0) {
+            setTrackByIndex(0);
+        }
+    }
+
+    function getStreamId() {
+        return streamInfo.id;
+    }
+
+    function provide(time, callback) {
+
+        if (typeof callback !== 'function') {
+            return;
+        }
         const track = thumbnailTracks.getCurrentTrack();
         let offset,
             request;
         if (!track || track.segmentDuration <= 0 || time === undefined || time === null) {
-            return null;
+            callback(null);
+            return;
         }
 
-        // Calculate index of the sprite given a time
-        if (isNaN(track.segmentDuration)) {
-            request = thumbnailTracks.getThumbnailRequestForTime(time);
-            if (request) {
-                track.segmentDuration = request.duration;
-            }
+        request = thumbnailTracks.getThumbnailRequestForTime(time);
+        if (request) {
+            track.segmentDuration = request.duration;
         }
 
         offset = time % track.segmentDuration;
@@ -87,27 +105,24 @@ function ThumbnailController(config) {
         if ('readThumbnail' in track) {
             return track.readThumbnail(time, (url) => {
                 thumbnail.url = url;
-                if (callback)
-                    callback(thumbnail);
+                callback(thumbnail);
             });
         } else {
             if (!request) {
                 const seq = Math.floor(time / track.segmentDuration);
-                thumbnail.url = buildUrlFromTemplate(track, seq);
+                thumbnail.url = _buildUrlFromTemplate(track, seq);
             } else {
                 thumbnail.url = request.url;
                 track.segmentDuration = NaN;
             }
-            if (callback)
-                callback(thumbnail);
-            return thumbnail;
+            callback(thumbnail);
         }
     }
 
-    function buildUrlFromTemplate(track, seq) {
+    function _buildUrlFromTemplate(track, seq) {
         const seqIdx = seq + track.startNumber;
         let url = replaceTokenForTemplate(track.templateUrl, 'Number', seqIdx);
-        url = replaceTokenForTemplate(url, 'Time', (seqIdx - 1) * track.segmentDuration);
+        url = replaceTokenForTemplate(url, 'Time', (seqIdx - 1) * track.segmentDuration * track.timescale);
         url = replaceTokenForTemplate(url, 'Bandwidth', track.bandwidth);
         return unescapeDollarsInTemplate(url);
     }
@@ -142,11 +157,13 @@ function ThumbnailController(config) {
     }
 
     instance = {
-        get: getThumbnail,
-        setTrackByIndex: setTrackByIndex,
-        getCurrentTrackIndex: getCurrentTrackIndex,
-        getBitrateList: getBitrateList,
-        reset: reset
+        getStreamId,
+        initialize,
+        provide,
+        setTrackByIndex,
+        getCurrentTrackIndex,
+        getBitrateList,
+        reset
     };
 
     setup();

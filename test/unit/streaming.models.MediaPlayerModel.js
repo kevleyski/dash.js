@@ -48,7 +48,7 @@ describe('MediaPlayerModel', function () {
         let FragmentLoaderRetryAttempts = mediaPlayerModel.getRetryAttemptsForType(HTTPRequest.MEDIA_SEGMENT_TYPE);
         expect(FragmentLoaderRetryAttempts).to.equal(3);
 
-        const s = {streaming: {retryAttempts: {}}};
+        const s = { streaming: { retryAttempts: {} } };
         s.streaming.retryAttempts[HTTPRequest.MEDIA_SEGMENT_TYPE] = 50;
         settings.update(s);
 
@@ -60,7 +60,7 @@ describe('MediaPlayerModel', function () {
         let FragmentLoaderRetryInterval = mediaPlayerModel.getRetryIntervalsForType(HTTPRequest.MEDIA_SEGMENT_TYPE);
         expect(FragmentLoaderRetryInterval).to.equal(1000);
 
-        const s = {streaming: {retryIntervals: {}}};
+        const s = { streaming: { retryIntervals: {} } };
         s.streaming.retryIntervals[HTTPRequest.MEDIA_SEGMENT_TYPE] = 50;
         settings.update(s);
 
@@ -72,7 +72,7 @@ describe('MediaPlayerModel', function () {
         let manifestLoaderRetryAttempts = mediaPlayerModel.getRetryAttemptsForType(HTTPRequest.MPD_TYPE);
         expect(manifestLoaderRetryAttempts).to.equal(3);
 
-        const s = {streaming: {retryAttempts: {}}};
+        const s = { streaming: { retryAttempts: {} } };
         s.streaming.retryAttempts[HTTPRequest.MPD_TYPE] = 50;
         settings.update(s);
 
@@ -103,7 +103,7 @@ describe('MediaPlayerModel', function () {
         let manifestLoaderRetryInterval = mediaPlayerModel.getRetryIntervalsForType(HTTPRequest.MPD_TYPE);
         expect(manifestLoaderRetryInterval).to.equal(500);
 
-        const s = {streaming: {retryIntervals: {}}};
+        const s = { streaming: { retryIntervals: {} } };
         s.streaming.retryIntervals[HTTPRequest.MPD_TYPE] = 50;
         settings.update(s);
 
@@ -131,11 +131,38 @@ describe('MediaPlayerModel', function () {
     });
 
     it('should configure StableBufferTime', function () {
-        const s = {streaming: {stableBufferTime: 50}};
+        const s = { streaming: { buffer: { stableBufferTime: 50 } } };
         settings.update(s);
 
         let StableBufferTime = mediaPlayerModel.getStableBufferTime();
         expect(StableBufferTime).to.equal(50);
+    });
+
+    it('should configure liveCatchupLatencyThreshold', function () {
+        settings.update({ streaming: { liveCatchup: { latencyThreshold: NaN } } });
+        let liveCatchupLatencyThreshold = mediaPlayerModel.getLiveCatchupLatencyThreshold();
+        expect(liveCatchupLatencyThreshold).to.be.NaN; // jshint ignore:line
+
+        settings.update({
+            streaming: {
+                lowLatencyEnabled: true,
+                delay: { liveDelay: 3 },
+                liveCatchup: { minDrift: 3 }
+            }
+        });
+
+        liveCatchupLatencyThreshold = mediaPlayerModel.getLiveCatchupLatencyThreshold();
+        expect(liveCatchupLatencyThreshold).to.equal(24);
+
+        settings.update({ streaming: { liveCatchup: { minDrift: NaN } } });
+
+        liveCatchupLatencyThreshold = mediaPlayerModel.getLiveCatchupLatencyThreshold();
+        expect(liveCatchupLatencyThreshold).to.equal(12);
+
+        settings.update({ streaming: { liveCatchup: { latencyThreshold: 50 } } });
+
+        liveCatchupLatencyThreshold = mediaPlayerModel.getLiveCatchupLatencyThreshold();
+        expect(liveCatchupLatencyThreshold).to.equal(50);
     });
 
 });

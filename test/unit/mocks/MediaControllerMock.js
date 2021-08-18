@@ -84,27 +84,24 @@ class MediaControllerMock {
         return this.switchMode[type];
     }
 
-    /**
-     * @param {string} mode
-     * @memberof MediaController#
-     */
-    setSelectionModeForInitialTrack(mode) {
-        this.selectionMode = mode;
-    }
-
-    getSelectionModeForInitialTrack() {
-        return this.selectionMode;
-    }
-
     isMultiTrackSupportedByType(type) {
-        return (type === 'audio' || type === 'video' || type === 'text' || type === 'fragmentedText');
+        return (type === 'audio' || type === 'video' || type === 'text');
     }
 
     isTracksEqual(currentTrack, mediaInfoForType) {
         return (mediaInfoForType.lang === 'deu');
     }
 
+    matchSettings(settings, track) {
+        const matchRole = !settings.role || !!track.roles.filter(function (item) {
+            return item === settings.role;
+        })[0];
+        return settings.lang === track.lang && matchRole;
+    }
+
     setConfig() {}
+
+    saveTextSettingsDisabled() {}
 
     reset() {
         this.setup();

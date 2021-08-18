@@ -55,6 +55,7 @@ function OfflineDownload(config) {
     const debug = config.debug;
     const manifestUpdater = config.manifestUpdater;
     const baseURLController = config.baseURLController;
+    const segmentBaseController = config.segmentBaseController;
     const constants = config.constants;
     const dashConstants = config.dashConstants;
     const urlUtils = config.urlUtils;
@@ -176,7 +177,7 @@ function OfflineDownload(config) {
         if (!e.error && manifestId !== null) {
             _status = OfflineConstants.OFFLINE_STATUS_STARTED;
             offlineStoreController.setDownloadingStatus(manifestId, _status).then(function () {
-                eventBus.trigger(events.OFFLINE_RECORD_STARTED, {id: manifestId, message: 'Downloading started for this stream !'});
+                eventBus.trigger(events.OFFLINE_RECORD_STARTED, { id: manifestId, message: 'Downloading started for this stream !' });
             });
         } else {
             _status = OfflineConstants.OFFLINE_STATUS_ERROR;
@@ -234,7 +235,7 @@ function OfflineDownload(config) {
             _status = OfflineConstants.OFFLINE_STATUS_FINISHED;
             offlineStoreController.setDownloadingStatus(manifestId, _status)
             .then(function () {
-                eventBus.trigger(events.OFFLINE_RECORD_FINISHED, {id: manifestId, message: 'Downloading has been successfully completed for this stream !'});
+                eventBus.trigger(events.OFFLINE_RECORD_FINISHED, { id: manifestId, message: 'Downloading has been successfully completed for this stream !' });
                 resetDownload();
             });
         } else {
@@ -321,6 +322,7 @@ function OfflineDownload(config) {
                     baseURLController: baseURLController,
                     timelineConverter: timelineConverter,
                     adapter: adapter,
+                    segmentBaseController: segmentBaseController,
                     offlineStoreController: offlineStoreController
                 });
                 _streams.push(stream);
@@ -440,7 +442,6 @@ function OfflineDownload(config) {
         rep[constants.VIDEO] = [];
         rep[constants.AUDIO] = [];
         rep[constants.TEXT] = [];
-        rep[constants.FRAGMENTED_TEXT] = [];
 
         // selectedRepresentations.video.forEach(item => {
         //     ret[constants.VIDEO].push(item.id);

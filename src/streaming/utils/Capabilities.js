@@ -29,21 +29,45 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 import FactoryMaker from '../../core/FactoryMaker';
+import {THUMBNAILS_SCHEME_ID_URIS} from '../thumbnail/ThumbnailTracks';
+import Constants from '../constants/Constants';
+
+const codecCompatibilityTable = [
+    {
+        'codec': 'avc1',
+        'compatibleCodecs': ['avc3']
+    },
+    {
+        'codec': 'avc3',
+        'compatibleCodecs': ['avc1']
+    }
+];
+
+export function supportsMediaSource() {
+    let hasWebKit = ('WebKitMediaSource' in window);
+    let hasMediaSource = ('MediaSource' in window);
+
+    return (hasWebKit || hasMediaSource);
+}
 
 function Capabilities() {
 
     let instance,
+        settings,
         encryptedMediaSupported;
 
     function setup() {
         encryptedMediaSupported = false;
     }
 
-    function supportsMediaSource() {
-        let hasWebKit = ('WebKitMediaSource' in window);
-        let hasMediaSource = ('MediaSource' in window);
+    function setConfig(config) {
+        if (!config) {
+            return;
+        }
 
-        return (hasWebKit || hasMediaSource);
+        if (config.settings) {
+            settings = config.settings;
+        }
     }
 
     /**
@@ -56,32 +80,161 @@ function Capabilities() {
         return encryptedMediaSupported;
     }
 
+    /**
+     *
+     * @param {boolean} value
+     */
     function setEncryptedMediaSupported(value) {
         encryptedMediaSupported = value;
     }
 
-    function supportsCodec(codec) {
-        if ('MediaSource' in window && MediaSource.isTypeSupported(codec)) {
-            return true;
+    /**
+     * Check if a codec is supported by the MediaSource. We use the MediaCapabilities API or the MSE to check.
+     * @param {object} config
+     * @param {string} type
+     * @return {Promise<boolean>}
+     */
+    function supportsCodec(config, type) {
+
+        if (type !== Constants.AUDIO && type !== Constants.VIDEO) {
+            return Promise.resolve(true);
         }
 
-        if ('WebKitMediaSource' in window && WebKitMediaSource.isTypeSupported(codec)) {
-            return true;
+        if (_canUseMediaCapabilitiesApi(config, type)) {
+            return _checkCodecWithMediaCapabilities(config, type);
         }
 
-        return false;
+        return _checkCodecWithMse(config);
+    }
+
+    /**
+     * MediaCapabilitiesAPI throws an error if one of the attribute is missing. We only use it if we have all required information.
+     * @param {object} config
+     * @param {string} type
+     * @return {*|boolean|boolean}
+     * @private
+     */
+    function _canUseMediaCapabilitiesApi(config, type) {
+
+        return settings.get().streaming.capabilities.useMediaCapabilitiesApi && navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo && ((config.codec && type === Constants.AUDIO) || (type === Constants.VIDEO && config.codec && config.width && config.height && config.bitrate && config.framerate));
+    }
+
+    /**
+     * Check codec support using the MSE
+     * @param {object} config
+     * @return {Promise<void> | Promise<boolean>}
+     * @private
+     */
+    function _checkCodecWithMse(config) {
+        return new Promise((resolve) => {
+            if (!config || !config.codec) {
+                resolve(false);
+                return;
+            }
+
+            let codec = config.codec;
+            if (config.width && config.height) {
+                codec += ';width="' + config.width + '";height="' + config.height + '"';
+            }
+
+            if ('MediaSource' in window && MediaSource.isTypeSupported(codec)) {
+                resolve(true);
+                return;
+            } else if ('WebKitMediaSource' in window && WebKitMediaSource.isTypeSupported(codec)) {
+                resolve(true);
+                return;
+            }
+
+            resolve(false);
+        });
+
+    }
+
+    /**
+     * Check codec support using the MediaCapabilities API
+     * @param {object} config
+     * @param {string} type
+     * @return {Promise<boolean>}
+     * @private
+     */
+    function _checkCodecWithMediaCapabilities(config, type) {
+        return new Promise((resolve) => {
+
+            if (!config || !config.codec) {
+                resolve(false);
+                return;
+            }
+
+            const configuration = {
+                type: 'media-source'
+            };
+
+            configuration[type] = {};
+            configuration[type].contentType = config.codec;
+            configuration[type].width = config.width;
+            configuration[type].height = config.height;
+            configuration[type].bitrate = parseInt(config.bitrate);
+            configuration[type].framerate = parseFloat(config.framerate);
+
+            navigator.mediaCapabilities.decodingInfo(configuration)
+                .then((result) => {
+                    resolve(result.supported);
+                })
+                .catch(() => {
+                    resolve(false);
+                });
+        });
+    }
+
+    /**
+     * Check if a specific EssentialProperty is supported
+     * @param {object} ep
+     * @return {boolean}
+     */
+    function supportsEssentialProperty(ep) {
+        try {
+            return THUMBNAILS_SCHEME_ID_URIS.indexOf(ep.schemeIdUri) !== -1;
+        } catch (e) {
+            return true;
+        }
+    }
+
+    /**
+     * Check if the root of the old codec is the same as the new one, or if it's declared as compatible in the compat table
+     * @param {string} codec1
+     * @param {string} codec2
+     * @return {boolean}
+     */
+    function codecRootCompatibleWithCodec(codec1, codec2) {
+        const codecRoot = codec1.split('.')[0];
+        const rootCompatible = codec2.indexOf(codecRoot) === 0;
+        let compatTableCodec;
+        for (let i = 0; i < codecCompatibilityTable.length; i++) {
+            if (codecCompatibilityTable[i].codec === codecRoot) {
+                compatTableCodec = codecCompatibilityTable[i];
+                break;
+            }
+        }
+        if (compatTableCodec) {
+            return rootCompatible || compatTableCodec.compatibleCodecs.some((compatibleCodec) => codec2.indexOf(compatibleCodec) === 0);
+        }
+        return rootCompatible;
     }
 
     instance = {
-        supportsMediaSource: supportsMediaSource,
-        supportsEncryptedMedia: supportsEncryptedMedia,
-        supportsCodec: supportsCodec,
-        setEncryptedMediaSupported: setEncryptedMediaSupported
+        setConfig,
+        supportsMediaSource,
+        supportsEncryptedMedia,
+        supportsCodec,
+        setEncryptedMediaSupported,
+        supportsEssentialProperty,
+        codecRootCompatibleWithCodec
     };
 
     setup();
 
     return instance;
 }
+
 Capabilities.__dashjs_factory_name = 'Capabilities';
 export default FactoryMaker.getSingletonFactory(Capabilities);
