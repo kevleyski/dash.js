@@ -38,9 +38,9 @@ function SegmentsController(config) {
     config = config || {};
 
     const context = this.context;
-    const events = config.events;
-    const eventBus = config.eventBus;
     const dashConstants = config.dashConstants;
+    const type = config.type;
+    const segmentBaseController = config.segmentBaseController;
 
     let instance,
         getters;
@@ -56,14 +56,25 @@ function SegmentsController(config) {
         getters[dashConstants.SEGMENT_BASE] = SegmentBaseGetter(context).create(config, isDynamic);
     }
 
-    function update(voRepresentation, type, mimeType, hasInitialization, hasSegments) {
-        if (!hasInitialization) {
-            eventBus.trigger(events.SEGMENTBASE_INIT_REQUEST_NEEDED, {mimeType: mimeType, representation: voRepresentation});
+    function updateInitData(voRepresentation, hasInitialization) {
+        if (hasInitialization) {
+            return Promise.resolve();
         }
+        return segmentBaseController.getSegmentBaseInitSegment({
+            representation: voRepresentation,
+            mediaType: type
+        });
+    }
 
-        if (!hasSegments) {
-            eventBus.trigger(events.SEGMENTBASE_SEGMENTSLIST_REQUEST_NEEDED, {mimeType: mimeType, mediaType: type, representation: voRepresentation});
+    function updateSegmentData(voRepresentation, hasSegments) {
+        if (hasSegments) {
+            return Promise.resolve();
         }
+        return segmentBaseController.getSegmentList({
+            mimeType: voRepresentation.mimeType,
+            representation: voRepresentation,
+            mediaType: type
+        });
     }
 
     function getSegmentsGetter(representation) {
@@ -80,11 +91,21 @@ function SegmentsController(config) {
         return getter ? getter.getSegmentByTime(representation, time) : null;
     }
 
+    function getMediaFinishedInformation(representation) {
+        const getter = getSegmentsGetter(representation);
+        return getter ? getter.getMediaFinishedInformation(representation) : {
+            numberOfSegments: 0,
+            mediaTimeOfLastSignaledSegment: NaN
+        };
+    }
+
     instance = {
-        initialize: initialize,
-        update: update,
-        getSegmentByIndex: getSegmentByIndex,
-        getSegmentByTime: getSegmentByTime
+        initialize,
+        updateInitData,
+        updateSegmentData,
+        getSegmentByIndex,
+        getSegmentByTime,
+        getMediaFinishedInformation
     };
 
     setup();

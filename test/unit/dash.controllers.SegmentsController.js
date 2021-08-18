@@ -29,6 +29,7 @@ describe('SegmentsController', function () {
     const eventBus = EventBus(context).getInstance();
 
     const segmentsController = SegmentsController(context).create({
+        streamInfo: {streamId: 'streamId'},
         dashMetrics: dashMetricsMock,
         mediaPlayerModel: mediaPlayerModel,
         errHandler: errHandler,
@@ -66,7 +67,4 @@ describe('SegmentsController', function () {
         expect(s).to.be.null; // jshint ignore:line
     });
 
-    it('update should not throw an error even if no parameter is defined', function () {
-        expect(segmentsController.update.bind(segmentsController)).not.to.throw();
-    });
 });

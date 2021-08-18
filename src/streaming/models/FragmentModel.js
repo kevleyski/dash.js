@@ -45,7 +45,8 @@ function FragmentModel(config) {
     const dashMetrics = config.dashMetrics;
     const fragmentLoader = config.fragmentLoader;
     const debug = config.debug;
-    const streamId = config.streamId;
+    const streamInfo = config.streamInfo;
+    const type = config.type;
 
     let instance,
         logger,
@@ -58,6 +59,14 @@ function FragmentModel(config) {
         eventBus.on(events.LOADING_COMPLETED, onLoadingCompleted, instance);
         eventBus.on(events.LOADING_DATA_PROGRESS, onLoadingInProgress, instance);
         eventBus.on(events.LOADING_ABANDONED, onLoadingAborted, instance);
+    }
+
+    function getStreamId() {
+        return streamInfo.id;
+    }
+
+    function getType() {
+        return type;
     }
 
     function isFragmentLoaded(request) {
@@ -185,20 +194,13 @@ function FragmentModel(config) {
     }
 
     function abortRequests() {
+        logger.debug('abort requests');
         fragmentLoader.abort();
         loadingRequests = [];
     }
 
     function executeRequest(request) {
         switch (request.action) {
-            case FragmentRequest.ACTION_COMPLETE:
-                executedRequests.push(request);
-                addSchedulingInfoMetrics(request, FRAGMENT_MODEL_EXECUTED);
-                logger.debug('STREAM_COMPLETED');
-                eventBus.trigger(events.STREAM_COMPLETED, {
-                    request: request
-                });
-                break;
             case FragmentRequest.ACTION_DOWNLOAD:
                 addSchedulingInfoMetrics(request, FRAGMENT_MODEL_LOADING);
                 loadingRequests.push(request);
@@ -210,10 +212,10 @@ function FragmentModel(config) {
     }
 
     function loadCurrentFragment(request) {
-        eventBus.trigger(events.FRAGMENT_LOADING_STARTED, {
-            streamId: streamId,
-            request: request
-        });
+        eventBus.trigger(events.FRAGMENT_LOADING_STARTED,
+            { request: request },
+            { streamId: streamInfo.id, mediaType: type }
+        );
         fragmentLoader.load(request);
     }
 
@@ -279,29 +281,38 @@ function FragmentModel(config) {
 
         addSchedulingInfoMetrics(e.request, e.error ? FRAGMENT_MODEL_FAILED : FRAGMENT_MODEL_EXECUTED);
 
-        eventBus.trigger(events.FRAGMENT_LOADING_COMPLETED, {
-            request: e.request,
-            response: e.response,
-            error: e.error,
-            sender: this
-        });
+        eventBus.trigger(events.FRAGMENT_LOADING_COMPLETED,
+            {
+                request: e.request,
+                response: e.response,
+                error: e.error,
+                sender: this
+            },
+            { streamId: streamInfo.id, mediaType: type }
+        );
     }
 
     function onLoadingInProgress(e) {
         if (e.sender !== fragmentLoader) return;
 
-        eventBus.trigger(events.FRAGMENT_LOADING_PROGRESS, {
-            request: e.request,
-            response: e.response,
-            error: e.error,
-            sender: this
-        });
+        eventBus.trigger(events.FRAGMENT_LOADING_PROGRESS,
+            {
+                request: e.request,
+                response: e.response,
+                error: e.error,
+                sender: this
+            },
+            { streamId: streamInfo.id, mediaType: type }
+        );
     }
 
     function onLoadingAborted(e) {
         if (e.sender !== fragmentLoader) return;
 
-        eventBus.trigger(events.FRAGMENT_LOADING_ABANDONED, { streamId: streamId, request: e.request, mediaType: e.mediaType });
+        eventBus.trigger(events.FRAGMENT_LOADING_ABANDONED,
+            { request: e.request },
+            { streamId: streamInfo.id, mediaType: type }
+        );
     }
 
     function resetInitialSettings() {
@@ -325,16 +336,19 @@ function FragmentModel(config) {
     }
 
     instance = {
-        getRequests: getRequests,
-        isFragmentLoaded: isFragmentLoaded,
-        isFragmentLoadedOrPending: isFragmentLoadedOrPending,
-        removeExecutedRequestsBeforeTime: removeExecutedRequestsBeforeTime,
-        removeExecutedRequestsAfterTime: removeExecutedRequestsAfterTime,
-        syncExecutedRequestsWithBufferedRange: syncExecutedRequestsWithBufferedRange,
-        abortRequests: abortRequests,
-        executeRequest: executeRequest,
-        reset: reset,
-        addExecutedRequest: addExecutedRequest
+        getStreamId,
+        getType,
+        getRequests,
+        isFragmentLoaded,
+        isFragmentLoadedOrPending,
+        removeExecutedRequestsBeforeTime,
+        removeExecutedRequestsAfterTime,
+        syncExecutedRequestsWithBufferedRange,
+        abortRequests,
+        executeRequest,
+        reset,
+        resetInitialSettings,
+        addExecutedRequest
     };
 
     setup();

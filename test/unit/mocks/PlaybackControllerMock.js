@@ -1,3 +1,5 @@
+import StreamControllerMock from './StreamControllerMock';
+
 class PlaybackControllerMock {
 
     constructor() {
@@ -9,12 +11,20 @@ class PlaybackControllerMock {
         this.playing = false;
         this.seeking = false;
         this.isDynamic = false;
+        this.time = 0;
+        this.streamController = new StreamControllerMock();
+        this.streamController.setup();
     }
 
-    initialize() {}
+    initialize() {
+    }
 
     getTimeToStreamEnd() {
         return 0;
+    }
+
+    getStreamController() {
+        return this.streamController;
     }
 
     isPlaybackStarted() {
@@ -52,7 +62,11 @@ class PlaybackControllerMock {
     }
 
     getTime() {
-        return null;
+        return this.time;
+    }
+
+    setTime(time) {
+        this.time = time;
     }
 
     getNormalizedTime() {
@@ -87,8 +101,12 @@ class PlaybackControllerMock {
         return this.liveStartTime;
     }
 
-    computeLiveDelay() {
-        return 16;
+    computeAndSetLiveDelay() {
+        return 15;
+    }
+
+    getLiveDelay() {
+        return 15;
     }
 
     reset() {
@@ -101,6 +119,11 @@ class PlaybackControllerMock {
     getStreamStartTime() {
         return 0;
     }
+
+    getAvailabilityStartTime() {
+        return 0;
+    }
+
 }
 
 export default PlaybackControllerMock;

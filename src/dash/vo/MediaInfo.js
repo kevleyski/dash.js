@@ -39,6 +39,7 @@ class MediaInfo {
         this.type = null;
         this.streamInfo = null;
         this.representationCount = 0;
+        this.labels = null;
         this.lang = null;
         this.viewpoint = null;
         this.accessibility = null;
@@ -47,25 +48,12 @@ class MediaInfo {
         this.codec = null;
         this.mimeType = null;
         this.contentProtection = null;
-        this.isText = false;
         this.KID = null;
         this.bitrateList = null;
+        this.isFragmented = null;
+        this.isEmbedded = null;
     }
 
-    isMediaInfoEqual(mediaInfo) {
-        if (!mediaInfo) {
-            return false;
-        }
-
-        const sameId = this.id === mediaInfo.id;
-        const sameViewpoint = this.viewpoint === mediaInfo.viewpoint;
-        const sameLang = this.lang === mediaInfo.lang;
-        const sameRoles = this.roles.toString() === mediaInfo.roles.toString();
-        const sameAccessibility = this.accessibility.toString() === mediaInfo.accessibility.toString();
-        const sameAudioChannelConfiguration = this.audioChannelConfiguration.toString() === mediaInfo.audioChannelConfiguration.toString();
-
-        return (sameId && sameViewpoint && sameLang && sameRoles && sameAccessibility && sameAudioChannelConfiguration);
-    }
 }
 
 export default MediaInfo;

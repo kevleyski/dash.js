@@ -3,26 +3,25 @@
         {
             "browserName":"chrome",
             "maxInstances":5,
-            "plateform":"WINDOWS",
+            "platform":"WINDOWS",
             "seleniumProtocol":"WebDriver"
         },
         {
             "browserName":"MicrosoftEdge",
             "maxInstances":5,
-            "plateform":"WINDOWS",
+            "platform":"WINDOWS",
             "seleniumProtocol":"WebDriver"
         },
         {
             "browserName":"firefox",
             "maxInstances":5,
-            "plateform":"WINDOWS",
+            "platform":"WINDOWS",
             "seleniumProtocol":"WebDriver",
             "acceptSslCerts":true,
             "trustAllSSLCertificates":true,
             "firefox_profile": "seleniumtests"
         }
     ],
-
 	"proxy": "org.openqa.grid.selenium.proxy.DefaultRemoteProxy",
 	"maxSession": 5,
 	"port": 5555,
@@ -31,5 +30,4 @@
 	"registerCycle": 5000,
 	"hubPort": 4444,
 	"hubHost": "127.0.0.1"
-
 }

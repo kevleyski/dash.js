@@ -9,8 +9,6 @@ describe('Constants', function () {
         expect(Constants.VIDEO).to.equal('video');
         expect(Constants.AUDIO).to.equal('audio');
         expect(Constants.TEXT).to.equal('text');
-        expect(Constants.FRAGMENTED_TEXT).to.equal('fragmentedText');
-        expect(Constants.EMBEDDED_TEXT).to.equal('embeddedText');
         expect(Constants.MUXED).to.equal('muxed');
         expect(Constants.LOCATION).to.equal('Location');
         expect(Constants.INITIALIZE).to.equal('initialize');
@@ -27,5 +25,7 @@ describe('Constants', function () {
         expect(Constants.START_TIME).to.equal('starttime');
         expect(Constants.BAD_ARGUMENT_ERROR).to.equal('Invalid Arguments');
         expect(Constants.MISSING_CONFIG_ERROR).to.equal('Missing config parameter(s)');
+        expect(Constants.DVB_REPORTING_URL).to.equal('dvb:reportingUrl');
+        expect(Constants.DVB_PROBABILITY).to.equal('dvb:probability');
     });
 });

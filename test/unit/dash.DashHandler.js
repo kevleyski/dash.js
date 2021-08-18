@@ -1,15 +1,14 @@
 import DashHandler from '../../src/dash/DashHandler';
 import Constants from '../../src/streaming/constants/Constants';
 import DashConstants from '../../src/dash/constants/DashConstants';
-import Settings from '../../src/core/Settings';
 import Events from '../../src/core/events/Events';
 import EventBus from '../../src/core/EventBus';
 import Debug from '../../src/core/Debug';
 import URLUtils from '../../src/streaming/utils/URLUtils';
+import MediaPlayerEvents from '../../src/streaming/MediaPlayerEvents';
 
 import ObjectsHelper from './helpers/ObjectsHelper';
 import VoHelper from './helpers/VOHelper';
-import MediaPlayerModelMock from './mocks/MediaPlayerModelMock';
 import DashMetricsMock from './mocks/DashMetricsMock';
 
 const expect = require('chai').expect;
@@ -21,28 +20,29 @@ describe('DashHandler', function () {
     // Arrange
     const context = {};
     const testType = Constants.VIDEO;
-    const settings = Settings(context).getInstance();
     const eventBus = EventBus(context).getInstance();
     const debug = Debug(context).getInstance();
+
+    Events.extend(MediaPlayerEvents);
 
     const timelineConverter = objectsHelper.getDummyTimelineConverter();
     const streamProcessor = objectsHelper.getDummyStreamProcessor(testType);
     const baseURLController = objectsHelper.getDummyBaseURLController();
-    const mediaPlayerModel = new MediaPlayerModelMock();
-    const dashMetricsMock = new DashMetricsMock();
+    const segmentsController = objectsHelper.getDummySegmentsController();
+    const dashMetrics = new DashMetricsMock();
+
 
     const config = {
-        mimeType: streamProcessor.getMediaInfo().mimeType,
-        timelineConverter: timelineConverter,
-        baseURLController: baseURLController,
-        mediaPlayerModel: mediaPlayerModel,
-        dashMetrics: dashMetricsMock,
-        settings: settings,
-        eventBus: eventBus,
+        eventBus,
         events: Events,
-        debug: debug,
-        dashConstants: DashConstants,
-        urlUtils: URLUtils(context).getInstance()
+        debug,
+        urlUtils: URLUtils(context).getInstance(),
+        type: 'video',
+        streamInfo: { id: 'id' },
+        segmentsController,
+        timelineConverter,
+        baseURLController,
+        dashMetrics
     };
 
     const dashHandler = DashHandler(context).create(config);

@@ -103,6 +103,7 @@ class DashConstants {
         this.CONTENTPROTECTION_ASARRAY = 'ContentProtection_asArray';
         this.MAIN = 'main';
         this.DYNAMIC = 'dynamic';
+        this.STATIC = 'static';
         this.MEDIA_PRESENTATION_DURATION = 'mediaPresentationDuration';
         this.MINIMUM_UPDATE_PERIOD = 'minimumUpdatePeriod';
         this.CODEC_PRIVATE_DATA = 'codecPrivateData';
@@ -130,6 +131,10 @@ class DashConstants {
         this.SERVICE_DESCRIPTION_SCOPE = 'Scope';
         this.SERVICE_DESCRIPTION_LATENCY = 'Latency';
         this.SERVICE_DESCRIPTION_PLAYBACK_RATE = 'PlaybackRate';
+        this.PATCH_LOCATION = 'PatchLocation';
+        this.PUBLISH_TIME = 'publishTime';
+        this.ORIGINAL_PUBLISH_TIME = 'originalPublishTime';
+        this.ORIGINAL_MPD_ID = 'mpdId';
     }
 
     constructor () {
