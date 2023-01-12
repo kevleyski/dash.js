@@ -73,6 +73,7 @@ function StreamProcessor(config) {
     let dashMetrics = config.dashMetrics;
     let settings = config.settings;
     let boxParser = config.boxParser;
+    let segmentBlacklistController = config.segmentBlacklistController;
 
     let instance,
         logger,
@@ -84,7 +85,6 @@ function StreamProcessor(config) {
         representationController,
         shouldUseExplicitTimeForRequest,
         qualityChangeInProgress,
-        manifestUpdateInProgress,
         dashHandler,
         segmentsController,
         bufferingTime;
@@ -96,6 +96,7 @@ function StreamProcessor(config) {
         eventBus.on(Events.DATA_UPDATE_COMPLETED, _onDataUpdateCompleted, instance, { priority: EventBus.EVENT_PRIORITY_HIGH }); // High priority to be notified before Stream
         eventBus.on(Events.INIT_FRAGMENT_NEEDED, _onInitFragmentNeeded, instance);
         eventBus.on(Events.MEDIA_FRAGMENT_NEEDED, _onMediaFragmentNeeded, instance);
+        eventBus.on(Events.INIT_FRAGMENT_LOADED, _onInitFragmentLoaded, instance);
         eventBus.on(Events.MEDIA_FRAGMENT_LOADED, _onMediaFragmentLoaded, instance);
         eventBus.on(Events.BUFFER_LEVEL_STATE_CHANGED, _onBufferLevelStateChanged, instance);
         eventBus.on(Events.BUFFER_CLEARED, _onBufferCleared, instance);
@@ -105,8 +106,7 @@ function StreamProcessor(config) {
         eventBus.on(Events.QUOTA_EXCEEDED, _onQuotaExceeded, instance);
         eventBus.on(Events.SET_FRAGMENTED_TEXT_AFTER_DISABLED, _onSetFragmentedTextAfterDisabled, instance);
         eventBus.on(Events.SET_NON_FRAGMENTED_TEXT, _onSetNonFragmentedText, instance);
-        eventBus.on(Events.MANIFEST_UPDATED, _onManifestUpdated, instance);
-        eventBus.on(Events.STREAMS_COMPOSED, _onStreamsComposed, instance);
+        eventBus.on(Events.SOURCE_BUFFER_ERROR, _onSourceBufferError, instance);
     }
 
     function initialize(mediaSource, hasVideoTrack, isFragmented) {
@@ -207,7 +207,6 @@ function StreamProcessor(config) {
         mediaInfo = null;
         bufferingTime = 0;
         shouldUseExplicitTimeForRequest = false;
-        manifestUpdateInProgress = false;
         qualityChangeInProgress = false;
     }
 
@@ -242,6 +241,7 @@ function StreamProcessor(config) {
         eventBus.off(Events.DATA_UPDATE_COMPLETED, _onDataUpdateCompleted, instance);
         eventBus.off(Events.INIT_FRAGMENT_NEEDED, _onInitFragmentNeeded, instance);
         eventBus.off(Events.MEDIA_FRAGMENT_NEEDED, _onMediaFragmentNeeded, instance);
+        eventBus.off(Events.INIT_FRAGMENT_LOADED, _onInitFragmentLoaded, instance);
         eventBus.off(Events.MEDIA_FRAGMENT_LOADED, _onMediaFragmentLoaded, instance);
         eventBus.off(Events.BUFFER_LEVEL_STATE_CHANGED, _onBufferLevelStateChanged, instance);
         eventBus.off(Events.BUFFER_CLEARED, _onBufferCleared, instance);
@@ -251,8 +251,7 @@ function StreamProcessor(config) {
         eventBus.off(Events.SET_FRAGMENTED_TEXT_AFTER_DISABLED, _onSetFragmentedTextAfterDisabled, instance);
         eventBus.off(Events.SET_NON_FRAGMENTED_TEXT, _onSetNonFragmentedText, instance);
         eventBus.off(Events.QUOTA_EXCEEDED, _onQuotaExceeded, instance);
-        eventBus.off(Events.MANIFEST_UPDATED, _onManifestUpdated, instance);
-        eventBus.off(Events.STREAMS_COMPOSED, _onStreamsComposed, instance);
+        eventBus.off(Events.SOURCE_BUFFER_ERROR, _onSourceBufferError, instance);
 
         resetInitialSettings();
         type = null;
@@ -266,10 +265,22 @@ function StreamProcessor(config) {
     /**
      * When a seek within the corresponding period occurs this function initiates the clearing of the buffer and sets the correct buffering time.
      * @param {object} e
+     * @param {number} oldTime
      * @private
      */
     function prepareInnerPeriodPlaybackSeeking(e) {
         return new Promise((resolve) => {
+
+            // If we seek to a buffered area we can keep requesting where we left before the seek
+            // If we seek back then forwards buffering will stop until we are below our buffer goal
+            // If we seek forwards then pruneBuffer() will make sure that the bufferToKeep setting is respected
+            const hasBufferAtTargetTime = bufferController.hasBufferAtTime(e.seekTime);
+            if (hasBufferAtTargetTime) {
+                bufferController.pruneBuffer();
+                resolve();
+                return;
+            }
+
             // Stop segment requests until we have figured out for which time we need to request a segment. We don't want to replace existing segments.
             scheduleController.clearScheduleTimer();
             fragmentModel.abortRequests();
@@ -284,13 +295,14 @@ function StreamProcessor(config) {
                 })
                 .then(() => {
                     // Figure out the correct segment request time.
-                    const targetTime = bufferController.getContinuousBufferTimeForTargetTime(e.seekTime);
+                    const continuousBufferTime = bufferController.getContinuousBufferTimeForTargetTime(e.seekTime);
 
                     // If the buffer is continuous and exceeds the duration of the period we are still done buffering. We need to trigger the buffering completed event in order to start prebuffering upcoming periods again
-                    if (!isNaN(streamInfo.duration) && isFinite(streamInfo.duration) && targetTime >= streamInfo.start + streamInfo.duration) {
+                    if (!isNaN(continuousBufferTime) && !isNaN(streamInfo.duration) && isFinite(streamInfo.duration) && continuousBufferTime >= streamInfo.start + streamInfo.duration) {
                         bufferController.setIsBufferingCompleted(true);
                         resolve();
                     } else {
+                        const targetTime = isNaN(continuousBufferTime) ? e.seekTime : continuousBufferTime;
                         setExplicitBufferingTime(targetTime);
                         bufferController.setSeekTarget(targetTime);
 
@@ -318,8 +330,8 @@ function StreamProcessor(config) {
                 .catch((e) => {
                     logger.error(e);
                 });
-        });
 
+        })
     }
 
     /**
@@ -361,7 +373,7 @@ function StreamProcessor(config) {
         // Event propagation may have been stopped (see MssHandler)
         if (!e.sender) return;
 
-        if (manifestUpdateInProgress) {
+        if (playbackController.getIsManifestUpdateInProgress()) {
             _noValidRequest();
             return;
         }
@@ -377,7 +389,7 @@ function StreamProcessor(config) {
                     return;
                 }
                 // Init segment not in cache, send new request
-                const request = dashHandler ? dashHandler.getInitRequest(getMediaInfo(), rep) : null;
+                const request = dashHandler ? dashHandler.getInitRequest(mediaInfo, rep) : null;
                 if (request) {
                     fragmentModel.executeRequest(request);
                 } else if (rescheduleIfNoRequest) {
@@ -394,19 +406,81 @@ function StreamProcessor(config) {
      * @private
      */
     function _onMediaFragmentNeeded(e, rescheduleIfNoRequest = true) {
-
-        if (manifestUpdateInProgress) {
+        // Don't schedule next fragments while updating manifest or pruning to avoid buffer inconsistencies
+        if (playbackController.getIsManifestUpdateInProgress() || bufferController.getIsPruningInProgress()) {
             _noValidRequest();
             return;
         }
 
-        let request = null;
+        let request = _getFragmentRequest();
+        if (request) {
+            shouldUseExplicitTimeForRequest = false;
+            _mediaRequestGenerated(request);
+        } else {
+            _noMediaRequestGenerated(rescheduleIfNoRequest);
+        }
+    }
 
+    /**
+     * If we generated a valid media request we can execute the request. In some cases the segment might be blacklisted.
+     * @param {object} request
+     * @private
+     */
+    function _mediaRequestGenerated(request) {
+        if (!isNaN(request.startTime + request.duration)) {
+            bufferingTime = request.startTime + request.duration;
+        }
+        request.delayLoadingTime = new Date().getTime() + scheduleController.getTimeToLoadDelay();
+        scheduleController.setTimeToLoadDelay(0);
+        if (!_shouldIgnoreRequest(request)) {
+            logger.debug(`Next fragment request url for stream id ${streamInfo.id} and media type ${type} is ${request.url}`);
+            fragmentModel.executeRequest(request);
+        } else {
+            logger.warn(`Fragment request url ${request.url} for stream id ${streamInfo.id} and media type ${type} is on the ignore list and will be skipped`);
+            _noValidRequest();
+        }
+    }
+
+    /**
+     * We could not generate a valid request. Check if the media is finished, we are stuck in a gap or simply need to wait for the next segment to be available.
+     * @param {boolean} rescheduleIfNoRequest
+     * @private
+     */
+    function _noMediaRequestGenerated(rescheduleIfNoRequest) {
         const representation = representationController.getCurrentRepresentation();
-        const lastSegmentRequested = dashHandler.lastSegmentRequested(representation, bufferingTime);
+
+        // If  this statement is true we might be stuck. A static manifest does not change and we did not find a valid request for the target time
+        // There is no point in trying again. We need to adjust the time in order to find a valid request. This can happen if the user/app seeked into a gap.
+        // For dynamic manifests this can also happen especially if we jump over the gap in the previous period and are using SegmentTimeline and in case there is a positive eptDelta at the beginning of the period we are stuck.
+        if (settings.get().streaming.gaps.enableSeekFix && (shouldUseExplicitTimeForRequest || playbackController.getTime() === 0)) {
+            let adjustedTime;
+            if (!isDynamic) {
+                adjustedTime = dashHandler.getValidTimeAheadOfTargetTime(bufferingTime, mediaInfo, representation, settings.get().streaming.gaps.threshold);
+            } else if (isDynamic && representation.segmentInfoType === DashConstants.SEGMENT_TIMELINE) {
+                // If we find a valid request ahead of the current time then we are in a gap. Segments are only added at the end of the timeline
+                adjustedTime = dashHandler.getValidTimeAheadOfTargetTime(bufferingTime, mediaInfo, representation, settings.get().streaming.gaps.threshold,);
+            }
+            if (!isNaN(adjustedTime) && adjustedTime !== bufferingTime) {
+                if (playbackController.isSeeking() || playbackController.getTime() === 0) {
+                    // If we are seeking then playback is stalled. Do a seek to get out of this situation
+                    logger.warn(`Adjusting playback time ${adjustedTime} because of gap in the manifest. Seeking by ${adjustedTime - bufferingTime}`);
+                    playbackController.seek(adjustedTime, false, false);
+                } else {
+                    // If we are not seeking we should still be playing but we cant find anything to buffer. So we adjust the buffering time and leave the gap jump to the GapController
+                    logger.warn(`Adjusting buffering time ${adjustedTime} because of gap in the manifest. Adjusting time by ${adjustedTime - bufferingTime}`);
+                    setExplicitBufferingTime(adjustedTime)
+
+                    if (rescheduleIfNoRequest) {
+                        _noValidRequest();
+                    }
+                }
+                return;
+            }
+        }
 
         // Check if the media is finished. If so, no need to schedule another request
-        if (lastSegmentRequested) {
+        const isLastSegmentRequested = dashHandler.isLastSegmentRequested(representation, bufferingTime);
+        if (isLastSegmentRequested) {
             const segmentIndex = dashHandler.getCurrentIndex();
             logger.debug(`Segment requesting for stream ${streamInfo.id} has finished`);
             eventBus.trigger(Events.STREAM_REQUESTING_COMPLETED, { segmentIndex }, {
@@ -418,26 +492,23 @@ function StreamProcessor(config) {
             return;
         }
 
-        // Don't schedule next fragments while pruning to avoid buffer inconsistencies
-        if (!bufferController.getIsPruningInProgress()) {
-            request = _getFragmentRequest();
-            if (request) {
-                shouldUseExplicitTimeForRequest = false;
-                if (!isNaN(request.startTime + request.duration)) {
-                    bufferingTime = request.startTime + request.duration;
-                }
-                request.delayLoadingTime = new Date().getTime() + scheduleController.getTimeToLoadDelay();
-                scheduleController.setTimeToLoadDelay(0);
-            }
-        }
-
-        if (request) {
-            logger.debug(`Next fragment request url for stream id ${streamInfo.id} and media type ${type} is ${request.url}`);
-            fragmentModel.executeRequest(request);
-        } else if (rescheduleIfNoRequest) {
-            // Use case - Playing at the bleeding live edge and frag is not available yet. Cycle back around.
+        if (rescheduleIfNoRequest) {
             _noValidRequest();
         }
+    }
+
+    /**
+     * In certain situations we need to ignore a request. For instance, if a segment is blacklisted because it caused an MSE error.
+     * @private
+     */
+    function _shouldIgnoreRequest(request) {
+        let blacklistUrl = request.url;
+
+        if (request.range) {
+            blacklistUrl = blacklistUrl.concat('_', request.range);
+        }
+
+        return segmentBlacklistController.contains(blacklistUrl)
     }
 
     /**
@@ -460,9 +531,9 @@ function StreamProcessor(config) {
             const representation = representationController && representationInfo ? representationController.getRepresentationForQuality(representationInfo.quality) : null;
 
             if (useTime) {
-                request = dashHandler.getSegmentRequestForTime(getMediaInfo(), representation, bufferingTime);
+                request = dashHandler.getSegmentRequestForTime(mediaInfo, representation, bufferingTime);
             } else {
-                request = dashHandler.getNextSegmentRequest(getMediaInfo(), representation);
+                request = dashHandler.getNextSegmentRequest(mediaInfo, representation);
             }
         }
 
@@ -474,20 +545,7 @@ function StreamProcessor(config) {
      * @private
      */
     function _noValidRequest() {
-        scheduleController.startScheduleTimer(settings.get().streaming.lowLatencyEnabled ? settings.get().streaming.scheduling.lowLatencyTimeout : settings.get().streaming.scheduling.defaultTimeout);
-    }
-
-    /**
-     * A new manifest has been loaded, updating is still in progress. Wait for the update to be finished before fetching new segments.
-     * Otherwise we end up in inconsistencies like wrong base urls especially if periods have been removed.
-     * @private
-     */
-    function _onManifestUpdated() {
-        manifestUpdateInProgress = true;
-    }
-
-    function _onStreamsComposed() {
-        manifestUpdateInProgress = false;
+        scheduleController.startScheduleTimer(playbackController.getLowLatencyModeEnabled() ? settings.get().streaming.scheduling.lowLatencyTimeout : settings.get().streaming.scheduling.defaultTimeout);
     }
 
     function _onDataUpdateCompleted(e) {
@@ -523,7 +581,26 @@ function StreamProcessor(config) {
         if (e.hasEnoughSpaceToAppend && e.quotaExceeded) {
             scheduleController.startScheduleTimer();
         }
+    }
 
+    /**
+     * This function is called when the corresponding SourceBuffer encountered an error.
+     * We blacklist the last segment assuming it caused the error
+     * @param {object} e
+     * @private
+     */
+    function _onSourceBufferError(e) {
+        if (!e || !e.lastRequestAppended || !e.lastRequestAppended.url) {
+            return;
+        }
+
+        let blacklistUrl = e.lastRequestAppended.url;
+
+        if (e.lastRequestAppended.range) {
+            blacklistUrl = blacklistUrl.concat('_', e.lastRequestAppended.range);
+        }
+        logger.warn(`Blacklisting segment with url ${blacklistUrl}`);
+        segmentBlacklistController.add(blacklistUrl);
     }
 
     /**
@@ -545,7 +622,7 @@ function StreamProcessor(config) {
         scheduleController.setCurrentRepresentation(representationInfo);
         representationController.prepareQualityChange(newQuality);
 
-        // Abort the current request to avoid inconsistencies. A quality switch can also be triggered manually by the application.
+        // Abort the current request to avoid inconsistencies and in case a rule such as AbandonRequestRule has forced a quality switch. A quality switch can also be triggered manually by the application.
         // If we update the buffer values now, or initialize a request to the new init segment, the currently downloading media segment might "work" with wrong values.
         // Everything that is already in the buffer queue is ok and will be handled by the corresponding function below depending on the switch mode.
         fragmentModel.abortRequests();
@@ -597,7 +674,7 @@ function StreamProcessor(config) {
     function _prepareForFastQualitySwitch(representationInfo) {
         // if we switch up in quality and need to replace existing parts in the buffer we need to adjust the buffer target
         const time = playbackController.getTime();
-        let safeBufferLevel = 1.5;
+        let safeBufferLevel = 1.5 * (!isNaN(representationInfo.fragmentDuration) ? representationInfo.fragmentDuration : 1);
         const request = fragmentModel.getRequests({
             state: FragmentModel.FRAGMENT_MODEL_EXECUTED,
             time: time + safeBufferLevel,
@@ -608,6 +685,7 @@ function StreamProcessor(config) {
             const bufferLevel = bufferController.getBufferLevel();
             const abandonmentState = abrController.getAbandonmentStateFor(streamInfo.id, type);
 
+            // The quality we originally requested was lower than the new quality
             if (request.quality < representationInfo.quality && bufferLevel >= safeBufferLevel && abandonmentState !== MetricsConstants.ABANDON_LOAD) {
                 const targetTime = time + safeBufferLevel;
                 setExplicitBufferingTime(targetTime);
@@ -791,7 +869,7 @@ function StreamProcessor(config) {
             let bitrate = null;
 
             if ((realAdaptation === null || (realAdaptation.id !== newRealAdaptation.id)) && type !== Constants.TEXT) {
-                averageThroughput = abrController.getThroughputHistory().getAverageThroughput(type);
+                averageThroughput = abrController.getThroughputHistory().getAverageThroughput(type, isDynamic);
                 bitrate = averageThroughput || abrController.getInitialBitrateFor(type, streamInfo.id);
                 quality = abrController.getQualityForBitrate(mediaInfo, bitrate, streamInfo.id);
             } else {
@@ -873,11 +951,26 @@ function StreamProcessor(config) {
             representationController.getRepresentationForQuality(representationInfo.quality) : null;
 
         let request = dashHandler.getNextSegmentRequestIdempotent(
-            getMediaInfo(),
+            mediaInfo,
             representation
         );
 
         return request;
+    }
+
+    function _onInitFragmentLoaded(e) {
+        if (!settings.get().streaming.enableManifestTimescaleMismatchFix) {
+            return;
+        }
+        const chunk = e.chunk;
+        const bytes = chunk.bytes;
+        const quality = chunk.quality;
+        const currentRepresentation = getRepresentationInfo(quality);
+        const voRepresentation = representationController && currentRepresentation ? representationController.getRepresentationForQuality(currentRepresentation.quality) : null;
+        if (currentRepresentation && voRepresentation) {
+            const timescale = boxParser.getMediaTimescaleFromMoov(bytes);
+            voRepresentation.timescale = timescale;
+        }
     }
 
     function _onMediaFragmentLoaded(e) {
@@ -891,8 +984,8 @@ function StreamProcessor(config) {
         // If we switch tracks this event might be fired after the representations in the RepresentationController have been updated according to the new MediaInfo.
         // In this case there will be no currentRepresentation and voRepresentation matching the "old" quality
         if (currentRepresentation && voRepresentation) {
-            const eventStreamMedia = adapter.getEventsFor(currentRepresentation.mediaInfo);
-            const eventStreamTrack = adapter.getEventsFor(currentRepresentation, voRepresentation);
+            const eventStreamMedia = adapter.getEventsFor(currentRepresentation.mediaInfo, null, streamInfo);
+            const eventStreamTrack = adapter.getEventsFor(currentRepresentation, voRepresentation, streamInfo);
 
             if (eventStreamMedia && eventStreamMedia.length > 0 || eventStreamTrack && eventStreamTrack.length > 0) {
                 const request = fragmentModel.getRequests({
@@ -1042,7 +1135,8 @@ function StreamProcessor(config) {
 
     function _bufferClearedForNonReplacement() {
         const time = playbackController.getTime();
-        const targetTime = bufferController.getContinuousBufferTimeForTargetTime(time);
+        const continuousBufferTime = bufferController.getContinuousBufferTimeForTargetTime(time);
+        const targetTime = isNaN(continuousBufferTime) ? time : continuousBufferTime;
 
         setExplicitBufferingTime(targetTime);
         scheduleController.startScheduleTimer();
@@ -1089,7 +1183,7 @@ function StreamProcessor(config) {
     }
 
     function _onSeekTarget(e) {
-        if (e && e.time) {
+        if (e && !isNaN(e.time)) {
             setExplicitBufferingTime(e.time);
             bufferController.setSeekTarget(e.time);
         }

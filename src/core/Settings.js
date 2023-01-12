@@ -33,6 +33,8 @@ import Utils from './Utils.js';
 import Debug from '../core/Debug';
 import Constants from '../streaming/constants/Constants';
 import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
+import EventBus from './EventBus';
+import Events from './events/Events';
 
 /** @module Settings
  * @description Define the configuration parameters of Dash.js MediaPlayer.
@@ -44,23 +46,29 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * @typedef {Object} PlayerSettings
  * @property {module:Settings~DebugSettings} [debug]
  * Debug related settings.
+ * @property {module:Settings~ErrorSettings} [errors]
+ * Error related settings
  * @property {module:Settings~StreamingSettings} [streaming]
  * Streaming related settings.
  * @example
  *
  * // Full settings object
  * settings = {
- *  debug: {
+ *        debug: {
  *            logLevel: Debug.LOG_LEVEL_WARNING,
  *            dispatchEvent: false
  *        },
  *        streaming: {
  *            abandonLoadTimeout: 10000,
  *            wallclockTimeUpdateInterval: 100,
- *            lowLatencyEnabled: false,
  *            manifestUpdateRetryInterval: 100,
  *            cacheInitSegments: true,
+ *            applyServiceDescription: true,
+ *            applyProducerReferenceTime: true,
+ *            applyContentSteering: true,
  *            eventControllerRefreshDelay: 100,
+ *            enableManifestDurationMismatchFix: true,
+ *            enableManifestTimescaleMismatchFix: false,
  *            capabilities: {
  *               filterUnsupportedEssentialProperties: true,
  *               useMediaCapabilitiesApi: false
@@ -75,13 +83,15 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *            delay: {
  *                liveDelayFragmentCount: NaN,
  *                liveDelay: NaN,
- *                useSuggestedPresentationDelay: true,
- *                applyServiceDescription: true
+ *                useSuggestedPresentationDelay: true
  *            },
  *            protection: {
- *                keepProtectionMediaKeys: false
+ *                keepProtectionMediaKeys: false,
+ *                ignoreEmeEncryptedEvent: false,
+ *                detectPlayreadyMessageFormat: true,
  *            },
  *            buffer: {
+ *                enableSeekDecorrelationFix: true,
  *                fastSwitchEnabled: true,
  *                flushBufferAtTrackSwitch: false,
  *                reuseExistingSourceBuffers: true,
@@ -94,15 +104,21 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *                longFormContentDurationThreshold: 600,
  *                stallThreshold: 0.5,
  *                useAppendWindow: true,
- *                setStallState: false
+ *                setStallState: true,
+ *                avoidCurrentTimeRangePruning: false,
+ *                useChangeTypeForTrackSwitch: true
  *            },
  *            gaps: {
  *                jumpGaps: true,
  *                jumpLargeGaps: true,
  *                smallGapLimit: 1.5,
- *                threshold: 0.3
+ *                threshold: 0.3,
+ *                enableSeekFix: true,
+ *                enableStallFix: false,
+ *                stallSeek: 0.1
  *            },
  *            utcSynchronization: {
+ *                enabled: true,
  *                useManifestDateHeaderTimeSource: true,
  *                backgroundAttempts: 2,
  *                timeBetweenSyncAttempts: 30,
@@ -122,13 +138,14 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *                scheduleWhilePaused: true
  *            },
  *            text: {
- *                defaultEnabled: true
+ *                defaultEnabled: true,
+ *                webvtt: {
+ *                    customRenderingEnabled: false
+ *                }
  *            },
  *            liveCatchup: {
- *                minDrift: 0.02,
- *                maxDrift: 0,
- *                playbackRate: 0.5,
- *                latencyThreshold: 60,
+ *                maxDrift: NaN,
+ *                playbackRate: {min: NaN, max: NaN},
  *                playbackBufferMin: 0.5,
  *                enabled: false,
  *                mode: Constants.LIVE_CATCHUP_MODE_DEFAULT
@@ -140,8 +157,9 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *                audio: Constants.TRACK_SWITCH_MODE_ALWAYS_REPLACE,
  *                video: Constants.TRACK_SWITCH_MODE_NEVER_REPLACE
  *            },
- *            selectionModeForInitialTrack: Constants.TRACK_SELECTION_MODE_HIGHEST_BITRATE,
- *            fragmentRequestTimeout: 0,
+ *            selectionModeForInitialTrack: Constants.TRACK_SELECTION_MODE_HIGHEST_SELECTION_PRIORITY,
+ *            fragmentRequestTimeout: 20000,
+ *            manifestRequestTimeout: 10000,
  *            retryIntervals: {
  *                [HTTPRequest.MPD_TYPE]: 500,
  *                [HTTPRequest.XLINK_EXPANSION_TYPE]: 500,
@@ -194,9 +212,15 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *                cid: null,
  *                rtp: null,
  *                rtpSafetyFactor: 5,
- *                mode: Constants.CMCD_MODE_QUERY
+ *                mode: Constants.CMCD_MODE_QUERY,
+ *                enabledKeys: ['br', 'd', 'ot', 'tb' , 'bl', 'dl', 'mtp', 'nor', 'nrr', 'su' , 'bs', 'rtp' , 'cid', 'pr', 'sf', 'sid', 'st', 'v']
  *            }
- *      }
+ *          },
+ *          errors: {
+ *            recoverAttempts: {
+ *                mediaErrorDecode: 5
+ *             }
+ *          }
  * }
  */
 
@@ -226,12 +250,16 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * If set, this parameter will take precedence over setLiveDelayFragmentCount and manifest info.
  * @property {boolean} [useSuggestedPresentationDelay=true]
  * Set to true if you would like to overwrite the default live delay and honor the SuggestedPresentationDelay attribute in by the manifest.
- * @property {boolean} [applyServiceDescription=true]
- * Set to true if dash.js should use latency targets defined in ServiceDescription elements
  */
 
 /**
  * @typedef {Object} Buffer
+ * @property {boolean} [enableSeekDecorrelationFix=false]
+ * Enables a workaround for playback start on some devices, e.g. WebOS 4.9.
+ * It is necessary because some browsers do not support setting currentTime on video element to a value that is outside of current buffer.
+ *
+ * If you experience unexpected seeking triggered by BufferController, you can try setting this value to false.
+
  * @property {boolean} [fastSwitchEnabled=true]
  * When enabled, after an ABR up-switch in quality, instead of requesting and appending the next fragment at the end of the current buffer range it is requested and appended closer to the current time.
  *
@@ -281,8 +309,15 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * Stall threshold used in BufferController.js to determine whether a track should still be changed and which buffer range to prune.
  * @property {boolean} [useAppendWindow=true]
  * Specifies if the appendWindow attributes of the MSE SourceBuffers should be set according to content duration from manifest.
- * @property {boolean} [setStallState=false]
+ * @property {boolean} [setStallState=true]
  * Specifies if we fire manual waiting events once the stall threshold is reached
+ * @property {boolean} [avoidCurrentTimeRangePruning=false]
+ * Avoids pruning of the buffered range that contains the current playback time.
+ *
+ * That buffered range is likely to have been enqueued for playback. Pruning it causes a flush and reenqueue in WPE and WebKitGTK based browsers. This stresses the video decoder and can cause stuttering on embedded platforms.
+ * @property {boolean} [useChangeTypeForTrackSwitch=true]
+ * If this flag is set to true then dash.js will use the MSE v.2 API call "changeType()" before switching to a different track.
+ * Note that some platforms might not implement the changeType functio. dash.js is checking for the availability before trying to call it.
  */
 
 /**
@@ -327,6 +362,14 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  */
 
 /**
+ * @typedef {Object} module:Settings~ErrorSettings
+ * @property {object} [recoverAttempts={mediaErrorDecode: 5}]
+ * Defines the maximum number of recover attempts for specific media errors.
+ *
+ * For mediaErrorDecode the player will reset the MSE and skip the blacklisted segment that caused the decode error. The resulting gap will be handled by the GapController.
+ */
+
+/**
  * @typedef {Object} CachingInfoSettings
  * @property {boolean} [enable]
  * Enable or disable the caching feature.
@@ -342,20 +385,28 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * Sets whether player should jump small gaps (discontinuities) in the buffer.
  * @property {boolean} [jumpLargeGaps=true]
  * Sets whether player should jump large gaps (discontinuities) in the buffer.
- * @property {number} [smallGapLimit=1.8]
+ * @property {number} [smallGapLimit=1.5]
  * Time in seconds for a gap to be considered small.
  * @property {number} [threshold=0.3]
  * Threshold at which the gap handling is executed. If currentRangeEnd - currentTime < threshold the gap jump will be triggered.
  * For live stream the jump might be delayed to keep a consistent live edge.
  * Note that the amount of buffer at which platforms automatically stall might differ.
+ * @property {boolean} [enableSeekFix=true]
+ * Enables the adjustment of the seek target once no valid segment request could be generated for a specific seek time. This can happen if the user seeks to a position for which there is a gap in the timeline.
+ * @property {boolean} [enableStallFix=false]
+ * If playback stalled in a buffered range this fix will perform a seek by the value defined in stallSeek to trigger playback again.
+ * @property {number} [stallSeek=0.1]
+ * Value to be used in case enableStallFix is set to true
  */
 
 /**
  * @typedef {Object} UtcSynchronizationSettings
- *
+ * @property {boolean} [enabled=true]
+ * Enables or disables the UTC clock synchronization
  * @property {boolean} [useManifestDateHeaderTimeSource=true]
  * Allows you to enable the use of the Date Header, if exposed with CORS, as a timing source for live edge detection.
  *
+ * The use of the date header will happen only after the other timing source that take precedence fail or are omitted as described.
  * @property {number} [backgroundAttempts=2]
  * Number of synchronization attempts to perform in the background after an initial synchronization request has been done. This is used to verify that the derived client-server offset is correct.
  *
@@ -401,19 +452,14 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * @typedef {Object} Text
  * @property {number} [defaultEnabled=true]
  * Enable/disable subtitle rendering by default.
+ * @property {object} [webvtt={customRenderingEnabled=false}]
+ * Enables the custom rendering for WebVTT captions. For details refer to the "Subtitles and Captions" sample section of dash.js.
+ * Custom WebVTT rendering requires the external library vtt.js that can be found in the contrib folder.
  */
 
 /**
  * @typedef {Object} LiveCatchupSettings
- * @property {number} [minDrift=0.02]
- * Use this method to set the minimum latency deviation allowed before activating catch-up mechanism.
- *
- * In low latency mode, when the difference between the measured latency and the target one, as an absolute number, is higher than the one sets with this method, then dash.js increases/decreases playback rate until target latency is reached.
- *
- * LowLatencyMinDrift should be provided in seconds, and it uses values between 0.0 and 0.5.
- *
- * Note: Catch-up mechanism is only applied when playing low latency live streams.
- * @property {number} [maxDrift=0]
+ * @property {number} [maxDrift=NaN]
  * Use this method to set the maximum latency deviation allowed before dash.js to do a seeking to live position.
  *
  * In low latency mode, when the difference between the measured latency and the target one, as an absolute number, is higher than the one sets with this method, then dash.js does a seek to live edge position minus the target live delay.
@@ -423,28 +469,20 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * If 0, then seeking operations won't be used for fixing latency deviations.
  *
  * Note: Catch-up mechanism is only applied when playing low latency live streams.
- * @property {number} [playbackRate=0.5]
- * Use this parameter to set the maximum catch up rate, as a percentage, for low latency live streams.
+ * @property {number} [playbackRate={min: NaN, max: NaN}]
+ * Use this parameter to set the minimum and maximum catch up rates, as percentages, for low latency live streams.
  *
  * In low latency mode, when measured latency is higher/lower than the target one, dash.js increases/decreases playback rate respectively up to (+/-) the percentage defined with this method until target is reached.
  *
- * Valid values for catch up rate are in range 0-0.5 (0-50%).
+ * Valid values for min catch up rate are in the range -0.5 to 0 (-50% to 0% playback rate decrease)
  *
- * Set it to 0 to turn off live catch up feature.
+ * Valid values for max catch up rate are in the range 0 to 1 (0% to 100% playback rate increase).
+ *
+ * Set min and max to NaN to turn off live catch up feature.
+ *
+ * These playback rate limits take precedence over any PlaybackRate values in ServiceDescription elements in an MPD. If only one of the min/max properties is given a value, the property without a value will not fall back to a ServiceDescription value. Its default value of NaN will be used.
  *
  * Note: Catch-up mechanism is only applied when playing low latency live streams.
- * @property {number} [latencyThreshold=NaN]
- * Use this parameter to set the maximum threshold for which live catch up is applied.
- *
- * For instance, if this value is set to 8 seconds, then live catchup is only applied if the current live latency is equal or below 8 seconds.
- *
- * The reason behind this parameter is to avoid an increase of the playback rate if the user seeks within the DVR window.
- *
- * If no value is specified this will be twice the maximum live delay.
- *
- * The maximum live delay is either specified in the manifest as part of a ServiceDescriptor or calculated the following:
- * maximumLiveDelay = targetDelay + liveCatchupMinDrift.
- *
  * @property {number} [playbackBufferMin=NaN]
  * Use this parameter to specify the minimum buffer which is used for LoL+ based playback rate reduction.
  *
@@ -494,6 +532,11 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * Set the value for the ProtectionController and MediaKeys life cycle.
  *
  * If true, the ProtectionController and then created MediaKeys and MediaKeySessions will be preserved during the MediaPlayer lifetime.
+ * @property {boolean} ignoreEmeEncryptedEvent
+ * If set to true the player will ignore "encrypted" and "needkey" events thrown by the EME.
+ *
+ * @property {boolean} detectPlayreadyMessageFormat
+ * If set to true the player will use the raw unwrapped message from the Playready CDM
  */
 
 /**
@@ -548,13 +591,13 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *
  * Useful on, for example, retina displays.
  * @property {module:Settings~AudioVideoSettings} [maxBitrate={audio: -1, video: -1}]
- * The maximum bitrate that the ABR algorithms will choose.
+ * The maximum bitrate that the ABR algorithms will choose. This value is specified in kbps.
  *
- * Use NaN for no limit.
+ * Use -1 for no limit.
  * @property {module:Settings~AudioVideoSettings} [minBitrate={audio: -1, video: -1}]
- * The minimum bitrate that the ABR algorithms will choose.
+ * The minimum bitrate that the ABR algorithms will choose. This value is specified in kbps.
  *
- * Use NaN for no limit.
+ * Use -1 for no limit.
  * @property {module:Settings~AudioVideoSettings} [maxRepresentationRatio={audio: 1, video: 1}]
  * When switching multi-bitrate content (auto or manual mode) this property specifies the maximum representation allowed, as a proportion of the size of the representation set.
  *
@@ -566,7 +609,9 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *
  * This feature is typically used to reserve higher representations for playback only when connected over a fast connection.
  * @property {module:Settings~AudioVideoSettings} [initialBitrate={audio: -1, video: -1}]
- * Explicitly set the starting bitrate for audio or video.
+ * Explicitly set the starting bitrate for audio or video. This value is specified in kbps.
+ *
+ * Use -1 to let the player decide.
  * @property {module:Settings~AudioVideoSettings} [initialRepresentationRatio={audio: -1, video: -1}]
  * Explicitly set the initial representation ratio.
  *
@@ -606,6 +651,8 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * The method to use to attach cmcd metrics to the requests. 'query' to use query parameters, 'header' to use http headers.
  *
  * If not specified this value defaults to 'query'.
+ * @property {Array.<string>} [enabledKeys]
+ * This value is used to specify the desired CMCD parameters. Parameters not included in this list are not reported.
  */
 
 /**
@@ -622,15 +669,21 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * This will only take effect after an abandoned fragment event occurs.
  * @property {number} [wallclockTimeUpdateInterval=50]
  * How frequently the wallclockTimeUpdated internal event is triggered (in milliseconds).
- * @property {boolean} [lowLatencyEnabled=false]
- * Enable or disable low latency mode.
- *
- * The use of the date header will happen only after the other timing source that take precedence fail or are omitted as described.
  * @property {number} [manifestUpdateRetryInterval=100]
  * For live streams, set the interval-frequency in milliseconds at which dash.js will check if the current manifest is still processed before downloading the next manifest once the minimumUpdatePeriod time has.
  * @property {boolean} [cacheInitSegments=true]
  * Enables the caching of init segments to avoid requesting the init segments before each representation switch.
+ * @property {boolean} [applyServiceDescription=true]
+ * Set to true if dash.js should use the parameters defined in ServiceDescription elements
+ * @property {boolean} [applyProducerReferenceTime=true]
+ * Set to true if dash.js should use the parameters defined in ProducerReferenceTime elements in combination with ServiceDescription elements.
+ * @property {boolean} [applyContentSteering=true]
+ * Set to true if dash.js should apply content steering during playback.
  * @property {number} [eventControllerRefreshDelay=100]
+ * For multi-period streams, overwrite the manifest mediaPresentationDuration attribute with the sum of period durations if the manifest mediaPresentationDuration is greater than the sum of period durations
+ * @property {boolean} [enableManifestDurationMismatchFix=true]
+ * Overwrite the manifest segments base information timescale attributes with the timescale set in initialization segments
+ * @property {boolean} [enableManifestTimescaleMismatchFix=false]
  * Defines the delay in milliseconds between two consecutive checks for events to be fired.
  * @property {module:Settings~Metrics} metrics Metric settings
  * @property {module:Settings~LiveDelay} delay Live Delay settings
@@ -667,8 +720,11 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  *
  * Possible values
  *
+ * - Constants.TRACK_SELECTION_MODE_HIGHEST_SELECTION_PRIORITY
+ * This mode makes the player select the track with the highest selectionPriority as defined in the manifest. If not selectionPriority is given we fallback to TRACK_SELECTION_MODE_HIGHEST_BITRATE. This mode is a default mode.
+ *
  * - Constants.TRACK_SELECTION_MODE_HIGHEST_BITRATE
- * This mode makes the player select the track with a highest bitrate. This mode is a default mode.
+ * This mode makes the player select the track with a highest bitrate.
  *
  * - Constants.TRACK_SELECTION_MODE_FIRST_TRACK
  * This mode makes the player select the first track found in the manifest.
@@ -680,8 +736,11 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  * This mode makes the player select the track with a widest range of bitrates.
  *
  *
- * @property {number} [fragmentRequestTimeout=0]
+ * @property {number} [fragmentRequestTimeout=20000]
  * Time in milliseconds before timing out on loading a media fragment.
+ *
+ * @property {number} [manifestRequestTimeout=10000]
+ * Time in milliseconds before timing out on loading a manifest.
  *
  * Fragments that timeout are retried as if they failed.
  * @property {module:Settings~RequestTypeSettings} [retryIntervals]
@@ -705,6 +764,16 @@ import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
  */
 function Settings() {
     let instance;
+    const context = this.context;
+    const eventBus = EventBus(context).getInstance();
+    const DISPATCH_KEY_MAP = {
+        'streaming.delay.liveDelay': Events.SETTING_UPDATED_LIVE_DELAY,
+        'streaming.delay.liveDelayFragmentCount': Events.SETTING_UPDATED_LIVE_DELAY_FRAGMENT_COUNT,
+        'streaming.liveCatchup.enabled': Events.SETTING_UPDATED_CATCHUP_ENABLED,
+        'streaming.liveCatchup.playbackRate.min': Events.SETTING_UPDATED_PLAYBACK_RATE_MIN,
+        'streaming.liveCatchup.playbackRate.max': Events.SETTING_UPDATED_PLAYBACK_RATE_MAX
+    };
+
 
     /**
      * @const {PlayerSettings} defaultSettings
@@ -718,10 +787,14 @@ function Settings() {
         streaming: {
             abandonLoadTimeout: 10000,
             wallclockTimeUpdateInterval: 100,
-            lowLatencyEnabled: false,
             manifestUpdateRetryInterval: 100,
             cacheInitSegments: false,
-            eventControllerRefreshDelay: 150,
+            applyServiceDescription: true,
+            applyProducerReferenceTime: true,
+            applyContentSteering: true,
+            eventControllerRefreshDelay: 100,
+            enableManifestDurationMismatchFix: true,
+            enableManifestTimescaleMismatchFix: false,
             capabilities: {
                 filterUnsupportedEssentialProperties: true,
                 useMediaCapabilitiesApi: false
@@ -736,13 +809,15 @@ function Settings() {
             delay: {
                 liveDelayFragmentCount: NaN,
                 liveDelay: NaN,
-                useSuggestedPresentationDelay: true,
-                applyServiceDescription: true
+                useSuggestedPresentationDelay: true
             },
             protection: {
-                keepProtectionMediaKeys: false
+                keepProtectionMediaKeys: false,
+                ignoreEmeEncryptedEvent: false,
+                detectPlayreadyMessageFormat: true,
             },
             buffer: {
+                enableSeekDecorrelationFix: false,
                 fastSwitchEnabled: true,
                 flushBufferAtTrackSwitch: false,
                 reuseExistingSourceBuffers: true,
@@ -755,15 +830,21 @@ function Settings() {
                 longFormContentDurationThreshold: 600,
                 stallThreshold: 0.3,
                 useAppendWindow: true,
-                setStallState: true
+                setStallState: true,
+                avoidCurrentTimeRangePruning: false,
+                useChangeTypeForTrackSwitch: true
             },
             gaps: {
                 jumpGaps: true,
                 jumpLargeGaps: true,
                 smallGapLimit: 1.5,
-                threshold: 0.3
+                threshold: 0.3,
+                enableSeekFix: true,
+                enableStallFix: false,
+                stallSeek: 0.1
             },
             utcSynchronization: {
+                enabled: true,
                 useManifestDateHeaderTimeSource: true,
                 backgroundAttempts: 2,
                 timeBetweenSyncAttempts: 30,
@@ -783,15 +864,19 @@ function Settings() {
                 scheduleWhilePaused: true
             },
             text: {
-                defaultEnabled: true
+                defaultEnabled: true,
+                webvtt: {
+                    customRenderingEnabled: false
+                }
             },
             liveCatchup: {
-                minDrift: 0.02,
-                maxDrift: 0,
-                playbackRate: 0.5,
-                latencyThreshold: 60,
+                maxDrift: NaN,
+                playbackRate: {
+                    min: NaN,
+                    max: NaN
+                },
                 playbackBufferMin: 0.5,
-                enabled: false,
+                enabled: null,
                 mode: Constants.LIVE_CATCHUP_MODE_DEFAULT
             },
             lastBitrateCachingInfo: {
@@ -810,8 +895,9 @@ function Settings() {
                 audio: Constants.TRACK_SWITCH_MODE_ALWAYS_REPLACE,
                 video: Constants.TRACK_SWITCH_MODE_NEVER_REPLACE
             },
-            selectionModeForInitialTrack: Constants.TRACK_SELECTION_MODE_HIGHEST_BITRATE,
-            fragmentRequestTimeout: 0,
+            selectionModeForInitialTrack: Constants.TRACK_SELECTION_MODE_HIGHEST_SELECTION_PRIORITY,
+            fragmentRequestTimeout: 20000,
+            manifestRequestTimeout: 10000,
             retryIntervals: {
                 [HTTPRequest.MPD_TYPE]: 500,
                 [HTTPRequest.XLINK_EXPANSION_TYPE]: 500,
@@ -843,7 +929,7 @@ function Settings() {
                     insufficientBufferRule: true,
                     switchHistoryRule: true,
                     droppedFramesRule: true,
-                    abandonRequestsRule: false
+                    abandonRequestsRule: true
                 },
                 bandwidthSafetyFactor: 0.9,
                 useDefaultABRRules: true,
@@ -882,7 +968,13 @@ function Settings() {
                 cid: null,
                 rtp: null,
                 rtpSafetyFactor: 5,
-                mode: Constants.CMCD_MODE_QUERY
+                mode: Constants.CMCD_MODE_QUERY,
+                enabledKeys: ['br', 'd', 'ot', 'tb' , 'bl', 'dl', 'mtp', 'nor', 'nrr', 'su' , 'bs', 'rtp' , 'cid', 'pr', 'sf', 'sid', 'st', 'v']
+            }
+        },
+        errors: {
+            recoverAttempts: {
+                mediaErrorDecode: 5
             }
         }
     };
@@ -895,11 +987,16 @@ function Settings() {
         for (let n in source) {
             if (source.hasOwnProperty(n)) {
                 if (dest.hasOwnProperty(n)) {
-                    if (typeof source[n] === 'object' && source[n] !== null) {
+                    if (typeof source[n] === 'object' && !(source[n] instanceof Array) && source[n] !== null) {
                         mixinSettings(source[n], dest[n], path.slice() + n + '.');
                     } else {
                         dest[n] = Utils.clone(source[n]);
+                        if (DISPATCH_KEY_MAP[path + n]) {
+                            eventBus.trigger(DISPATCH_KEY_MAP[path + n]);
+                        }
                     }
+                } else {
+                    console.error('Settings parameter ' + path + n + ' is not supported');
                 }
             }
         }
@@ -942,9 +1039,9 @@ function Settings() {
     }
 
     instance = {
-        get: get,
-        update: update,
-        reset: reset
+        get,
+        update,
+        reset
     };
 
     return instance;

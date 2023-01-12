@@ -24,10 +24,10 @@
         "useSuggestedPresentationDelay": false,
         "manifestUpdateRetryInterval": 100,
         "liveCatchup": {
-            "minDrift": 0.02,
             "maxDrift": 0,
-            "playbackRate": 0.5,
-            "latencyThreshold": null,
+            "playbackRate": {
+                "min": -0.05,
+                "max": 0.5,
             "enabled": false
         },
         "lastBitrateCachingInfo": { "enabled": true, "ttl": 360000},

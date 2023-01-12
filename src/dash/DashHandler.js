@@ -40,6 +40,9 @@ import {
 import DashConstants from './constants/DashConstants';
 
 
+const DEFAULT_ADJUST_SEEK_TIME_THRESHOLD = 0.5;
+const SEGMENT_START_TIME_DELTA = 0.001;
+
 function DashHandler(config) {
 
     config = config || {};
@@ -169,6 +172,7 @@ function DashHandler(config) {
         request.timescale = representation.timescale;
         request.availabilityStartTime = segment.availabilityStartTime;
         request.availabilityEndTime = segment.availabilityEndTime;
+        request.availabilityTimeComplete = representation.availabilityTimeComplete;
         request.wallStartTime = segment.wallStartTime;
         request.quality = representation.index;
         request.index = segment.index;
@@ -181,7 +185,7 @@ function DashHandler(config) {
         }
     }
 
-    function lastSegmentRequested(representation, bufferingTime) {
+    function isLastSegmentRequested(representation, bufferingTime) {
         if (!representation || !lastSegment) {
             return false;
         }
@@ -296,6 +300,83 @@ function DashHandler(config) {
         return request;
     }
 
+    /**
+     * This function returns a time larger than the current time for which we can generate a request.
+     * This is useful in scenarios in which the user seeks into a gap in a dynamic Timeline manifest. We will not find a valid request then and need to adjust the seektime.
+     * @param {number} time
+     * @param {object} mediaInfo
+     * @param {object} representation
+     * @param {number} targetThreshold
+     */
+    function getValidTimeAheadOfTargetTime(time, mediaInfo, representation, targetThreshold) {
+        try {
+
+            if (isNaN(time) || !mediaInfo || !representation) {
+                return NaN;
+            }
+
+            if (time < 0) {
+                time = 0;
+            }
+
+            if (isNaN(targetThreshold)) {
+                targetThreshold = DEFAULT_ADJUST_SEEK_TIME_THRESHOLD;
+            }
+
+            if (getSegmentRequestForTime(mediaInfo, representation, time)) {
+                return time;
+            }
+
+            if (representation.adaptation.period.start + representation.adaptation.period.duration < time) {
+                return NaN;
+            }
+
+            // If we have a duration look until the end of the duration, otherwise maximum 30 seconds
+            const end = isFinite(representation.adaptation.period.duration) ? representation.adaptation.period.start + representation.adaptation.period.duration : time + 30;
+            let currentUpperTime = Math.min(time + targetThreshold, end);
+            let adjustedTime = NaN;
+            let targetRequest = null;
+
+            while (currentUpperTime <= end) {
+                let upperRequest = null;
+
+                if (currentUpperTime <= end) {
+                    upperRequest = getSegmentRequestForTime(mediaInfo, representation, currentUpperTime);
+                }
+
+                if (upperRequest) {
+                    adjustedTime = currentUpperTime;
+                    targetRequest = upperRequest;
+                    break;
+                }
+
+                currentUpperTime += targetThreshold;
+            }
+
+            if (targetRequest) {
+                const requestEndTime = targetRequest.startTime + targetRequest.duration;
+
+                // Keep the original start time in case it is covered by a segment
+                if (time > targetRequest.startTime && requestEndTime - time > targetThreshold) {
+                    return time;
+                }
+
+                if (!isNaN(targetRequest.startTime) && time < targetRequest.startTime && adjustedTime > targetRequest.startTime) {
+                    // Apply delta to segment start time to get around rounding issues
+                    return targetRequest.startTime + SEGMENT_START_TIME_DELTA;
+                }
+
+                return Math.min(requestEndTime - targetThreshold, adjustedTime);
+            }
+
+            return adjustedTime;
+
+
+        } catch (e) {
+            return NaN;
+        }
+    }
+
     function getCurrentIndex() {
         return lastSegment ? lastSegment.index : -1;
     }
@@ -314,9 +395,10 @@ function DashHandler(config) {
         getSegmentRequestForTime,
         getCurrentIndex,
         getNextSegmentRequest,
-        lastSegmentRequested,
+        isLastSegmentRequested,
         reset,
-        getNextSegmentRequestIdempotent
+        getNextSegmentRequestIdempotent,
+        getValidTimeAheadOfTargetTime
     };
 
     setup();

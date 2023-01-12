@@ -48,7 +48,9 @@ function VideoModel() {
     let instance,
         logger,
         element,
+        _currentTime,
         TTMLRenderingDiv,
+        vttRenderingDiv,
         previousPlaybackRate;
 
     const VIDEO_MODEL_WRONG_ELEMENT_TYPE = 'element is not video or audio DOM type!';
@@ -59,6 +61,7 @@ function VideoModel() {
 
     function setup() {
         logger = Debug(context).getInstance().getLogger(instance);
+        _currentTime = NaN;
     }
 
     function initialize() {
@@ -76,9 +79,9 @@ function VideoModel() {
         }
     }
 
-    function setPlaybackRate(value) {
+    function setPlaybackRate(value, ignoreReadyState = false) {
         if (!element) return;
-        if (element.readyState <= 2 && value > 0) {
+        if (!ignoreReadyState && element.readyState <= 2 && value > 0) {
             // If media element hasn't loaded enough data to play yet, wait until it has
             element.addEventListener('canplay', onPlaybackCanPlay);
         } else {
@@ -88,13 +91,13 @@ function VideoModel() {
 
     //TODO Move the DVR window calculations from MediaPlayer to Here.
     function setCurrentTime(currentTime, stickToBuffered) {
+        _currentTime = currentTime;
         waitForReadyState(Constants.VIDEO_ELEMENT_READY_STATES.HAVE_METADATA, () => {
             if (element) {
-                //_currentTime = currentTime;
-
                 // We don't set the same currentTime because it can cause firing unexpected Pause event in IE11
                 // providing playbackRate property equals to zero.
-                if (element.currentTime === currentTime) {
+                if (element.currentTime === _currentTime) {
+                    _currentTime = NaN;
                     return;
                 }
 
@@ -104,12 +107,14 @@ function VideoModel() {
                 // set currentTime even if readyState = 0.
                 // setTimeout is used to workaround InvalidStateError in IE11
                 try {
-                    currentTime = stickToBuffered ? stickTimeToBuffered(currentTime) : currentTime;
-                    element.currentTime = currentTime;
+                    _currentTime = stickToBuffered ? stickTimeToBuffered(_currentTime) : _currentTime;
+                    element.currentTime = _currentTime;
+                    _currentTime = NaN;
                 } catch (e) {
                     if (element.readyState === 0 && e.code === e.INVALID_STATE_ERR) {
                         setTimeout(function () {
-                            element.currentTime = currentTime;
+                            element.currentTime = _currentTime;
+                            _currentTime = NaN;
                         }, 400);
                     }
                 }
@@ -182,6 +187,10 @@ function VideoModel() {
         return TTMLRenderingDiv;
     }
 
+    function getVttRenderingDiv() {
+        return vttRenderingDiv;
+    }
+
     function setTTMLRenderingDiv(div) {
         TTMLRenderingDiv = div;
         // The styling will allow the captions to match the video window size and position.
@@ -191,6 +200,10 @@ function VideoModel() {
         TTMLRenderingDiv.style.pointerEvents = 'none';
         TTMLRenderingDiv.style.top = 0;
         TTMLRenderingDiv.style.left = 0;
+    }
+
+    function setVttRenderingDiv(div) {
+        vttRenderingDiv = div;
     }
 
     function setStallState(type, state) {
@@ -287,11 +300,11 @@ function VideoModel() {
     }
 
     function isSeeking() {
-        return element ? element.seeking : null;
+        return element ? (element.seeking || !isNaN(_currentTime)) : null;
     }
 
     function getTime() {
-        return element ? element.currentTime : null;
+        return element ? (!isNaN(_currentTime) ? _currentTime : element.currentTime) : null;
     }
 
     function getPlaybackRate() {
@@ -425,42 +438,45 @@ function VideoModel() {
     }
 
     instance = {
-        initialize: initialize,
-        setCurrentTime: setCurrentTime,
-        play: play,
-        isPaused: isPaused,
-        pause: pause,
+        initialize,
+        setCurrentTime,
+        play,
+        isPaused,
+        pause,
         isStalled,
-        isSeeking: isSeeking,
-        getTime: getTime,
-        getPlaybackRate: getPlaybackRate,
-        setPlaybackRate: setPlaybackRate,
-        getPlayedRanges: getPlayedRanges,
-        getEnded: getEnded,
-        setStallState: setStallState,
-        getElement: getElement,
-        setElement: setElement,
-        setSource: setSource,
-        getSource: getSource,
-        getTTMLRenderingDiv: getTTMLRenderingDiv,
-        setTTMLRenderingDiv: setTTMLRenderingDiv,
-        getPlaybackQuality: getPlaybackQuality,
-        addEventListener: addEventListener,
-        removeEventListener: removeEventListener,
-        getReadyState: getReadyState,
-        getBufferRange: getBufferRange,
-        getClientWidth: getClientWidth,
-        getClientHeight: getClientHeight,
-        getTextTracks: getTextTracks,
-        getTextTrack: getTextTrack,
-        addTextTrack: addTextTrack,
-        appendChild: appendChild,
-        removeChild: removeChild,
-        getVideoWidth: getVideoWidth,
-        getVideoHeight: getVideoHeight,
-        getVideoRelativeOffsetTop: getVideoRelativeOffsetTop,
-        getVideoRelativeOffsetLeft: getVideoRelativeOffsetLeft,
-        reset: reset
+        isSeeking,
+        getTime,
+        getPlaybackRate,
+        setPlaybackRate,
+        getPlayedRanges,
+        getEnded,
+        setStallState,
+        getElement,
+        setElement,
+        setSource,
+        getSource,
+        getTTMLRenderingDiv,
+        setTTMLRenderingDiv,
+        getVttRenderingDiv,
+        setVttRenderingDiv,
+        getPlaybackQuality,
+        addEventListener,
+        removeEventListener,
+        getReadyState,
+        getBufferRange,
+        getClientWidth,
+        getClientHeight,
+        getTextTracks,
+        getTextTrack,
+        addTextTrack,
+        appendChild,
+        removeChild,
+        getVideoWidth,
+        getVideoHeight,
+        getVideoRelativeOffsetTop,
+        getVideoRelativeOffsetLeft,
+        waitForReadyState,
+        reset
     };
 
     setup();

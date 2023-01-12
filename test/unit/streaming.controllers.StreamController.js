@@ -17,7 +17,9 @@ import VideoModelMock from './mocks/VideoModelMock';
 import PlaybackControllerMock from './mocks/PlaybackControllerMock';
 import URIFragmentModelMock from './mocks/URIFragmentModelMock';
 import CapabilitiesFilterMock from './mocks/CapabilitiesFilterMock';
+import ContentSteeringControllerMock from './mocks/ContentSteeringControllerMock';
 import TextControllerMock from './mocks/TextControllerMock';
+import ServiceDescriptionController from '../../src/dash/controllers/ServiceDescriptionController';
 
 const chai = require('chai');
 const spies = require('chai-spies');
@@ -45,6 +47,7 @@ const baseUrlControllerMock = new BaseURLControllerMock();
 const uriFragmentModelMock = new URIFragmentModelMock();
 const capabilitiesFilterMock = new CapabilitiesFilterMock();
 const textControllerMock = new TextControllerMock();
+const contentSteeringControllerMock = new ContentSteeringControllerMock();
 
 Events.extend(ProtectionEvents);
 
@@ -122,6 +125,7 @@ describe('StreamController', function () {
     describe('Well initialized', () => {
 
         beforeEach(function () {
+            settings.reset();
             streamController.setConfig({
                 adapter: adapterMock,
                 manifestLoader: manifestLoaderMock,
@@ -135,6 +139,7 @@ describe('StreamController', function () {
                 baseURLController: baseUrlControllerMock,
                 capabilitiesFilter: capabilitiesFilterMock,
                 textController: textControllerMock,
+                contentSteeringController: contentSteeringControllerMock,
                 settings: settings
             });
 
@@ -160,7 +165,7 @@ describe('StreamController', function () {
 
             it('should throw an exception when attempting to composeStreams while no manifest has been parsed', function () {
                 eventBus.trigger(Events.TIME_SYNCHRONIZATION_COMPLETED);
-                expect(errHandlerMock.errorValue).to.include('There are no streams');
+                expect(errHandlerMock.errorValue).to.include('There are no periods in the MPD');
             });
 
             it('should return the correct error when a playback error occurs : MEDIA_ERR_ABORTED', function () {
@@ -176,6 +181,7 @@ describe('StreamController', function () {
             });
 
             it('should return the correct error when a playback error occurs : MEDIA_ERR_DECODE', function () {
+                settings.update({ errors: { recoverAttempts: { mediaErrorDecode: 0 } } })
                 eventBus.trigger(Events.PLAYBACK_ERROR, { error: { code: 3 } });
 
                 expect(errHandlerMock.errorValue).to.include('MEDIA_ERR_DECODE');
@@ -217,7 +223,7 @@ describe('StreamController', function () {
 
             let staticStreamInfo = { manifestInfo: { isDynamic: false }, start: 10, duration: 600, id: '1' };
             let dynamicStreamInfo = {
-                manifestInfo: { isDynamic: true, DVRWindowSize: 30, minBufferTime: 4 },
+                manifestInfo: { isDynamic: true, dvrWindowSize: 30, minBufferTime: 4 },
                 start: 10,
                 duration: Infinity,
                 id: '1'
@@ -238,6 +244,8 @@ describe('StreamController', function () {
             beforeEach(function () {
                 videoModelMock.time = -1;
                 dashMetricsMock.addDVRInfo('video', Date.now(), null, dvrWindowRange);
+                const serviceDescriptionController = ServiceDescriptionController(context).getInstance();
+
                 streamController.setConfig({
                     adapter: adapterMock,
                     manifestLoader: manifestLoaderMock,
@@ -250,7 +258,8 @@ describe('StreamController', function () {
                     playbackController: playbackControllerMock,
                     baseURLController: baseUrlControllerMock,
                     settings: settings,
-                    uriFragmentModel: uriFragmentModelMock
+                    uriFragmentModel: uriFragmentModelMock,
+                    serviceDescriptionController
                 });
 
                 streamController.initialize(false);
@@ -297,6 +306,18 @@ describe('StreamController', function () {
                     eventBus.trigger(Events.TIME_SYNCHRONIZATION_COMPLETED);
                 });
 
+                it('should start static stream at #t with milliseconds', function (done) {
+                    doneFn = done;
+
+                    let uriStartTime = 10.555;
+                    uriFragmentModelMock.setURIFragmentData({ t: uriStartTime.toString() });
+
+                    expectedStartTime = staticStreamInfo.start + uriStartTime;
+
+                    getStreamsInfoStub.returns([staticStreamInfo]);
+                    eventBus.trigger(Events.TIME_SYNCHRONIZATION_COMPLETED);
+                });
+
                 it('should start static stream at period start if #t is before period start', function (done) {
                     doneFn = done;
 
@@ -334,6 +355,20 @@ describe('StreamController', function () {
             });
 
             describe('dynamic streams', function () {
+
+                before(function () {
+                    adapterMock.setRegularPeriods([
+                        {
+                            mpd: {
+                                availabilityStartTime: new Date(0)
+                            }
+                        }
+                    ])
+                })
+
+                after(function () {
+                    adapterMock.setRegularPeriods([]);
+                })
 
                 beforeEach(function () {
                     getIsDynamicStub.returns(true);
@@ -387,6 +422,18 @@ describe('StreamController', function () {
                     doneFn = done;
 
                     let uriStartTime = dvrWindowRange.start + 10;
+                    uriFragmentModelMock.setURIFragmentData({ t: 'posix:' + uriStartTime.toString() });
+
+                    expectedStartTime = uriStartTime;
+
+                    getStreamsInfoStub.returns([dynamicStreamInfo]);
+                    eventBus.trigger(Events.TIME_SYNCHRONIZATION_COMPLETED);
+                });
+
+                it('should start dynamic stream at #t=posix on millisecond level', function (done) {
+                    doneFn = done;
+
+                    let uriStartTime = dvrWindowRange.start + 10.555;
                     uriFragmentModelMock.setURIFragmentData({ t: 'posix:' + uriStartTime.toString() });
 
                     expectedStartTime = uriStartTime;

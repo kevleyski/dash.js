@@ -140,7 +140,8 @@ function CmcdModel() {
         try {
             if (settings.get().streaming.cmcd && settings.get().streaming.cmcd.enabled) {
                 const cmcdData = _getCmcdData(request);
-                const finalPayloadString = _buildFinalString(cmcdData);
+                const filteredCmcdData = _applyWhitelist(cmcdData);
+                const finalPayloadString = _buildFinalString(filteredCmcdData);
 
                 eventBus.trigger(MetricsReportingEvents.CMCD_DATA_GENERATED, {
                     url: request.url,
@@ -160,6 +161,22 @@ function CmcdModel() {
         }
     }
 
+    function _applyWhitelist(cmcdData) {
+        try {
+            const enabledCMCDKeys = settings.get().streaming.cmcd.enabledKeys;
+
+            return Object.keys(cmcdData)
+                .filter(key => enabledCMCDKeys.includes(key))
+                .reduce((obj, key) => {
+                    obj[key] = cmcdData[key];
+
+                    return obj;
+                }, {});
+        } catch (e) {
+            return cmcdData;
+        }
+    }
+
     function _copyParameters(data, parameterNames) {
         const copiedData = {};
         for (let name of parameterNames) {
@@ -174,10 +191,10 @@ function CmcdModel() {
         try {
             if (settings.get().streaming.cmcd && settings.get().streaming.cmcd.enabled) {
                 const cmcdData = _getCmcdData(request);
-                const cmcdObjectHeader = _copyParameters(cmcdData, ['br', 'd', 'ot', 'tb']);
-                const cmcdRequestHeader = _copyParameters(cmcdData, ['bl', 'dl', 'mtp', 'nor', 'nrr', 'su']);
-                const cmcdStatusHeader = _copyParameters(cmcdData, ['bs', 'rtp']);
-                const cmcdSessionHeader = _copyParameters(cmcdData, ['cid', 'pr', 'sf', 'sid', 'st', 'v']);
+                const cmcdObjectHeader = _copyParameters(cmcdData, _applyWhitelistByKeys(['br', 'd', 'ot', 'tb']));
+                const cmcdRequestHeader = _copyParameters(cmcdData, _applyWhitelistByKeys(['bl', 'dl', 'mtp', 'nor', 'nrr', 'su']));
+                const cmcdStatusHeader = _copyParameters(cmcdData, _applyWhitelistByKeys(['bs', 'rtp']));
+                const cmcdSessionHeader = _copyParameters(cmcdData, _applyWhitelistByKeys(['cid', 'pr', 'sf', 'sid', 'st', 'v']));
                 const headers = {
                     'CMCD-Object': _buildFinalString(cmcdObjectHeader),
                     'CMCD-Request': _buildFinalString(cmcdRequestHeader),
@@ -188,7 +205,8 @@ function CmcdModel() {
                 eventBus.trigger(MetricsReportingEvents.CMCD_DATA_GENERATED, {
                     url: request.url,
                     mediaType: request.mediaType,
-                    cmcdData
+                    cmcdData,
+                    headers
                 });
                 return headers;
             }
@@ -197,6 +215,12 @@ function CmcdModel() {
         } catch (e) {
             return null;
         }
+    }
+
+    function _applyWhitelistByKeys(keys) {
+        const enabledCMCDKeys = settings.get().streaming.cmcd.enabledKeys;
+
+        return keys.filter(key => enabledCMCDKeys.includes(key));
     }
 
     function _getCmcdData(request) {
@@ -233,7 +257,7 @@ function CmcdModel() {
     function _getCmcdDataForMpd() {
         const data = _getGenericCmcdData();
 
-        data.ot = `${OBJECT_TYPES.MANIFEST}`;
+        data.ot = OBJECT_TYPES.MANIFEST;
 
         return data;
     }
@@ -269,8 +293,7 @@ function CmcdModel() {
 
         if (nextRequest) {
             if (request.url !== nextRequest.url) {
-                let url = new URL(nextRequest.url);
-                data.nor = url.pathname;
+                data.nor = encodeURIComponent(Utils.getRelativeUrl(request.url, nextRequest.url));
             } else if (nextRequest.range) {
                 data.nrr = nextRequest.range;
             }
@@ -340,7 +363,7 @@ function CmcdModel() {
     function _getCmcdDataForInitSegment() {
         const data = _getGenericCmcdData();
 
-        data.ot = `${OBJECT_TYPES.INIT}`;
+        data.ot = OBJECT_TYPES.INIT;
         data.su = true;
 
         return data;
@@ -349,7 +372,7 @@ function CmcdModel() {
     function _getCmcdDataForOther() {
         const data = _getGenericCmcdData();
 
-        data.ot = `${OBJECT_TYPES.OTHER}`;
+        data.ot = OBJECT_TYPES.OTHER;
 
         return data;
     }
@@ -460,8 +483,8 @@ function CmcdModel() {
     function _onManifestLoaded(data) {
         try {
             const isDynamic = dashManifestModel.getIsDynamic(data.data);
-            const st = isDynamic ? `${STREAM_TYPES.LIVE}` : `${STREAM_TYPES.VOD}`;
-            const sf = data.protocol && data.protocol === 'MSS' ? `${STREAMING_FORMATS.MSS}` : `${STREAMING_FORMATS.DASH}`;
+            const st = isDynamic ? STREAM_TYPES.LIVE : STREAM_TYPES.VOD;
+            const sf = data.protocol && data.protocol === 'MSS' ? STREAMING_FORMATS.MSS : STREAMING_FORMATS.DASH;
 
             internalData.st = `${st}`;
             internalData.sf = `${sf}`;
@@ -511,9 +534,8 @@ function CmcdModel() {
 
             let cmcdString = keys.reduce((acc, key, index) => {
                 if (key === 'v' && cmcdData[key] === 1) return acc; // Version key should only be reported if it is != 1
-                if (typeof cmcdData[key] === 'string' && (key !== 'ot' || key !== 'sf' || key !== 'st')) {
-                    let string = cmcdData[key].replace(/"/g, '\"');
-                    acc += `${key}="${string}"`;
+                if (typeof cmcdData[key] === 'string' && key !== 'ot' && key !== 'sf' && key !== 'st') {
+                    acc += `${key}=${JSON.stringify(cmcdData[key])}`;
                 } else {
                     acc += `${key}=${cmcdData[key]}`;
                 }
@@ -525,6 +547,9 @@ function CmcdModel() {
             }, '');
 
             cmcdString = cmcdString.replace(/=true/g, '');
+
+            // Remove last comma at the end
+            cmcdString = cmcdString.replace(/,\s*$/, '');
 
             return cmcdString;
         } catch (e) {

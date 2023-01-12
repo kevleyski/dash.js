@@ -38,6 +38,7 @@ import Event from './vo/Event';
 import FactoryMaker from '../core/FactoryMaker';
 import DashManifestModel from './models/DashManifestModel';
 import PatchManifestModel from './models/PatchManifestModel';
+import bcp47Normalize from 'bcp-47-normalize';
 
 /**
  * @module DashAdapter
@@ -385,6 +386,28 @@ function DashAdapter() {
     }
 
     /**
+     * Returns the ProducerReferenceTimes as saved in the DashManifestModel if present
+     * @param {object} streamInfo
+     * @param {object} mediaInfo
+     * @returns {object} producerReferenceTimes
+     * @memberOf module:DashAdapter
+     * @instance
+     */
+    function getProducerReferenceTimes(streamInfo, mediaInfo) {
+        let id, realAdaptation;
+
+        const selectedVoPeriod = getPeriodForStreamInfo(streamInfo, voPeriods);
+        id = mediaInfo ? mediaInfo.id : null;
+
+        if (voPeriods.length > 0 && selectedVoPeriod) {
+            realAdaptation = id ? dashManifestModel.getAdaptationForId(id, voPeriods[0].mpd.manifest, selectedVoPeriod.index) : dashManifestModel.getAdaptationForIndex(mediaInfo ? mediaInfo.index : null, voPeriods[0].mpd.manifest, selectedVoPeriod.index);
+        }
+
+        if (!realAdaptation) return [];
+        return dashManifestModel.getProducerReferenceTimesForAdaptation(realAdaptation);
+    }
+
+    /**
      * Return all EssentialProperties of a Representation
      * @param {object} representation
      * @return {array}
@@ -426,7 +449,7 @@ function DashAdapter() {
      * Returns the event for the given parameters.
      * @param {object} eventBox
      * @param {object} eventStreams
-     * @param {number} mediaStartTime
+     * @param {number} mediaStartTime - Specified in seconds
      * @param {object} voRepresentation
      * @returns {null|Event}
      * @memberOf module:DashAdapter
@@ -450,8 +473,10 @@ function DashAdapter() {
             const timescale = eventBox.timescale || 1;
             const periodStart = voRepresentation.adaptation.period.start;
             const eventStream = eventStreams[schemeIdUri + '/' + value];
+            // The PTO in voRepresentation is already specified in seconds
             const presentationTimeOffset = !isNaN(voRepresentation.presentationTimeOffset) ? voRepresentation.presentationTimeOffset : !isNaN(eventStream.presentationTimeOffset) ? eventStream.presentationTimeOffset : 0;
-            let presentationTimeDelta = eventBox.presentation_time_delta / timescale; // In case of version 1 events the presentation_time is parsed as presentation_time_delta
+            // In case of version 1 events the presentation_time is parsed as presentation_time_delta
+            let presentationTimeDelta = eventBox.presentation_time_delta / timescale;
             let calculatedPresentationTime;
 
             if (eventBox.version === 0) {
@@ -460,7 +485,7 @@ function DashAdapter() {
                 calculatedPresentationTime = periodStart - presentationTimeOffset + presentationTimeDelta;
             }
 
-            const duration = eventBox.event_duration;
+            const duration = eventBox.event_duration / timescale;
             const id = eventBox.id;
             const messageData = eventBox.message_data;
 
@@ -488,18 +513,21 @@ function DashAdapter() {
      * @instance
      * @ignore
      */
-    function getEventsFor(info, voRepresentation) {
+    function getEventsFor(info, voRepresentation, streamInfo) {
         let events = [];
 
         if (voPeriods.length > 0) {
             const manifest = voPeriods[0].mpd.manifest;
 
             if (info instanceof StreamInfo) {
-                events = dashManifestModel.getEventsForPeriod(getPeriodForStreamInfo(info, voPeriods));
+                const period = getPeriodForStreamInfo(info, voPeriods)
+                events = dashManifestModel.getEventsForPeriod(period);
             } else if (info instanceof MediaInfo) {
-                events = dashManifestModel.getEventStreamForAdaptationSet(manifest, getAdaptationForMediaInfo(info));
+                const period = getPeriodForStreamInfo(streamInfo, voPeriods)
+                events = dashManifestModel.getEventStreamForAdaptationSet(manifest, getAdaptationForMediaInfo(info), period);
             } else if (info instanceof RepresentationInfo) {
-                events = dashManifestModel.getEventStreamForRepresentation(manifest, voRepresentation);
+                const period = getPeriodForStreamInfo(streamInfo, voPeriods)
+                events = dashManifestModel.getEventStreamForRepresentation(manifest, voRepresentation, period);
             }
         }
 
@@ -613,6 +641,17 @@ function DashAdapter() {
     function getMpd(externalManifest) {
         const manifest = getManifest(externalManifest);
         return dashManifestModel.getMpd(manifest);
+    }
+
+    /**
+     * Returns the ContentSteering element of the MPD
+     * @param {object} manifest
+     * @returns {object} contentSteering
+     * @memberOf module:DashAdapter
+     * @instance
+     */
+    function getContentSteering(manifest) {
+        return dashManifestModel.getContentSteering(manifest);
     }
 
     /**
@@ -1023,11 +1062,17 @@ function DashAdapter() {
         mediaInfo.mimeType = dashManifestModel.getMimeType(realAdaptation);
         mediaInfo.contentProtection = dashManifestModel.getContentProtectionData(realAdaptation);
         mediaInfo.bitrateList = dashManifestModel.getBitrateListForAdaptation(realAdaptation);
+        mediaInfo.selectionPriority = dashManifestModel.getSelectionPriority(realAdaptation);
 
         if (mediaInfo.contentProtection) {
-            mediaInfo.contentProtection.forEach(function (item) {
-                item.KID = dashManifestModel.getKID(item);
-            });
+            // Get the default key ID and apply it to all key systems
+            const keyIds = mediaInfo.contentProtection.map(cp => dashManifestModel.getKID(cp)).filter(kid => kid !== null);
+            if (keyIds.length) {
+                const keyId = keyIds[0];
+                mediaInfo.contentProtection.forEach(cp => {
+                    cp.keyId = keyId;
+                });
+            }
         }
 
         mediaInfo.isText = dashManifestModel.getIsText(realAdaptation);
@@ -1046,7 +1091,7 @@ function DashAdapter() {
         mediaInfo.codec = 'cea-608-in-SEI';
         mediaInfo.isEmbedded = true;
         mediaInfo.isFragmented = false;
-        mediaInfo.lang = lang;
+        mediaInfo.lang = bcp47Normalize(lang);
         mediaInfo.roles = ['caption'];
     }
 
@@ -1071,7 +1116,7 @@ function DashAdapter() {
     function convertMpdToManifestInfo(mpd) {
         let manifestInfo = new ManifestInfo();
 
-        manifestInfo.DVRWindowSize = mpd.timeShiftBufferDepth;
+        manifestInfo.dvrWindowSize = mpd.timeShiftBufferDepth;
         manifestInfo.loadedTime = mpd.manifest.loadedTime;
         manifestInfo.availableFrom = mpd.availabilityStartTime;
         manifestInfo.minBufferTime = mpd.manifest.minBufferTime;
@@ -1161,6 +1206,7 @@ function DashAdapter() {
         getAllMediaInfoForType,
         getAdaptationForType,
         getRealAdaptation,
+        getProducerReferenceTimes,
         getRealPeriodByIndex,
         getEssentialPropertiesForRepresentation,
         getVoRepresentations,
@@ -1177,6 +1223,7 @@ function DashAdapter() {
         getIsDynamic,
         getDuration,
         getRegularPeriods,
+        getContentSteering,
         getLocation,
         getPatchLocation,
         getManifestUpdatePeriod,

@@ -52,6 +52,8 @@ class MediaInfo {
         this.bitrateList = null;
         this.isFragmented = null;
         this.isEmbedded = null;
+        this.selectionPriority = 1;
+        this.supplementalProperties = {};
     }
 
 }

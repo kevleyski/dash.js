@@ -54,7 +54,6 @@ function FragmentLoader(config) {
             dashMetrics: config.dashMetrics,
             mediaPlayerModel: config.mediaPlayerModel,
             requestModifier: config.requestModifier,
-            useFetch: config.settings.get().streaming.lowLatencyEnabled,
             urlUtils: urlUtils,
             constants: Constants,
             boxParser: config.boxParser,
@@ -65,10 +64,7 @@ function FragmentLoader(config) {
 
     function checkForExistence(request) {
         const report = function (success) {
-            eventBus.trigger(events.CHECK_FOR_EXISTENCE_COMPLETED, {
-                    request: request,
-                    exists: success
-                }
+            eventBus.trigger(events.CHECK_FOR_EXISTENCE_COMPLETED, { request: request, exists: success }
             );
         };
 
