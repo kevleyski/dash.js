@@ -29,8 +29,9 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-import DVBErrors from '../vo/DVBErrors';
-import MetricsReportingEvents from '../MetricsReportingEvents';
+import DVBErrors from '../vo/DVBErrors.js';
+import MetricsReportingEvents from '../MetricsReportingEvents.js';
+import FactoryMaker from '../../../core/FactoryMaker.js';
 
 function DVBErrorsTranslator(config) {
 
@@ -89,10 +90,10 @@ function DVBErrorsTranslator(config) {
     }
 
     function handleHttpMetric(vo) {
-        if ((vo.responsecode === 0) ||      // connection failure - unknown
-            (vo.responsecode == null) || // Generated on .catch() and when uninitialised
+        if ((vo.responsecode === 0) || // connection failure - unknown
+            (vo.responsecode == null) || // Generated on .catch() and when uninitialized
             (vo.responsecode >= 400) || // HTTP error status code
-            (vo.responsecode < 100) ||  // unknown status codes
+            (vo.responsecode < 100) || // unknown status codes
             (vo.responsecode >= 600)) { // unknown status codes
             report({
                 errorcode: vo.responsecode || DVBErrors.CONNECTION_ERROR,
@@ -133,10 +134,10 @@ function DVBErrorsTranslator(config) {
         });
     }
 
-    function initialise() {
+    function initialize() {
         eventBus.on(Events.MANIFEST_UPDATED, onManifestUpdate, instance);
         eventBus.on(
-            Events.SERVICE_LOCATION_BLACKLIST_CHANGED,
+            Events.SERVICE_LOCATION_BASE_URL_BLACKLIST_CHANGED,
             onServiceLocationChanged,
             instance
         );
@@ -153,7 +154,7 @@ function DVBErrorsTranslator(config) {
     function reset() {
         eventBus.off(Events.MANIFEST_UPDATED, onManifestUpdate, instance);
         eventBus.off(
-            Events.SERVICE_LOCATION_BLACKLIST_CHANGED,
+            Events.SERVICE_LOCATION_BASE_URL_BLACKLIST_CHANGED,
             onServiceLocationChanged,
             instance
         );
@@ -168,7 +169,7 @@ function DVBErrorsTranslator(config) {
     }
 
     instance = {
-        initialise,
+        initialize,
         reset
     };
 
@@ -176,4 +177,4 @@ function DVBErrorsTranslator(config) {
 }
 
 DVBErrorsTranslator.__dashjs_factory_name = 'DVBErrorsTranslator';
-export default dashjs.FactoryMaker.getSingletonFactory(DVBErrorsTranslator); /* jshint ignore:line */
+export default FactoryMaker.getSingletonFactory(DVBErrorsTranslator); 

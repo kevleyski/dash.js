@@ -28,11 +28,12 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import OfflineConstants from './constants/OfflineConstants';
-import OfflineStream from './OfflineStream';
-import OfflineIndexDBManifestParser from './utils/OfflineIndexDBManifestParser';
-import OfflineErrors from './errors/OfflineErrors';
-import DashParser from '../dash/parser/DashParser';
+import OfflineConstants from './constants/OfflineConstants.js';
+import OfflineStream from './OfflineStream.js';
+import OfflineIndexDBManifestParser from './utils/OfflineIndexDBManifestParser.js';
+import OfflineErrors from './errors/OfflineErrors.js';
+import DashParser from '../dash/parser/DashParser.js';
+import FactoryMaker from '../core/FactoryMaker.js';
 
 function OfflineDownload(config) {
     config = config || {};
@@ -333,7 +334,7 @@ function OfflineDownload(config) {
                 });
                 _streams.push(stream);
 
-                // initialise stream and get downloadable representations
+                // initialize stream and get downloadable representations
                 stream.initialize(streamInfo);
                 _progressionById[streamInfo.id] = null;
             }
@@ -411,7 +412,7 @@ function OfflineDownload(config) {
             return;
         }
 
-        if (_manifest.Period_asArray.length > 1) {
+        if (_manifest.Period.length > 1) {
             _status = OfflineConstants.OFFLINE_STATUS_ERROR;
             errHandler.error({
                 code: OfflineErrors.OFFLINE_ERROR,
@@ -428,7 +429,7 @@ function OfflineDownload(config) {
 
         // save original manifest (for resume)
 
-        // initialise offline streams
+        // initialize offline streams
         composeStreams(_manifest);
 
         // get MediaInfos
@@ -666,4 +667,4 @@ function OfflineDownload(config) {
 }
 
 OfflineDownload.__dashjs_factory_name = 'OfflineDownload';
-export default dashjs.FactoryMaker.getClassFactory(OfflineDownload); /* jshint ignore:line */
+export default FactoryMaker.getClassFactory(OfflineDownload); 

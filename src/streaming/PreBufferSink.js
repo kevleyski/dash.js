@@ -28,8 +28,8 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import Debug from '../core/Debug';
-import FactoryMaker from '../core/FactoryMaker';
+import Debug from '../core/Debug.js';
+import FactoryMaker from '../core/FactoryMaker.js';
 
 /**
  * This is a sink that is used to temporarily hold onto media chunks before a video element is added.
@@ -75,14 +75,17 @@ function PreBufferSink(onAppendedCallback) {
                 chunk: chunk
             });
         }
+        return Promise.resolve();
     }
 
     function remove(start, end) {
         chunks = chunks.filter(a => !((isNaN(end) || a.start < end) && (isNaN(start) || a.end > start))); //The opposite of the getChunks predicate.
+        return Promise.resolve();
     }
 
     //Nothing async, nothing to abort.
     function abort() {
+        return Promise.resolve();
     }
 
     function getAllBufferRanges() {
@@ -117,7 +120,7 @@ function PreBufferSink(onAppendedCallback) {
     }
 
     function updateTimestampOffset() {
-        // Nothing to do
+        return Promise.resolve();
     }
 
     function getBuffer() {
@@ -154,15 +157,15 @@ function PreBufferSink(onAppendedCallback) {
     }
 
     instance = {
-        getAllBufferRanges: getAllBufferRanges,
-        append: append,
-        remove: remove,
-        abort: abort,
-        discharge: discharge,
-        reset: reset,
-        updateTimestampOffset: updateTimestampOffset,
-        waitForUpdateEnd: waitForUpdateEnd,
-        getBuffer: getBuffer
+        getAllBufferRanges,
+        append,
+        remove,
+        abort,
+        discharge,
+        reset,
+        updateTimestampOffset,
+        waitForUpdateEnd,
+        getBuffer
     };
 
     setup();

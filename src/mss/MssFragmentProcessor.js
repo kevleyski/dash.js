@@ -29,9 +29,10 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-import MssFragmentMoofProcessor from './MssFragmentMoofProcessor';
-import MssFragmentMoovProcessor from './MssFragmentMoovProcessor';
-import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
+import MssFragmentMoofProcessor from './MssFragmentMoofProcessor.js';
+import MssFragmentMoovProcessor from './MssFragmentMoovProcessor.js';
+import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest.js';
+import FactoryMaker from '../core/FactoryMaker.js';
 
 
 // Add specific box processors not provided by codem-isoboxer library
@@ -175,8 +176,8 @@ function MssFragmentProcessor(config) {
     }
 
     instance = {
-        generateMoov: generateMoov,
-        processFragment: processFragment
+        generateMoov,
+        processFragment
     };
 
     setup();
@@ -185,4 +186,4 @@ function MssFragmentProcessor(config) {
 }
 
 MssFragmentProcessor.__dashjs_factory_name = 'MssFragmentProcessor';
-export default dashjs.FactoryMaker.getClassFactory(MssFragmentProcessor); /* jshint ignore:line */
+export default FactoryMaker.getClassFactory(MssFragmentProcessor);

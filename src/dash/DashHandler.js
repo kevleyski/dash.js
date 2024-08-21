@@ -28,16 +28,16 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import FragmentRequest from '../streaming/vo/FragmentRequest';
-import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest';
-import FactoryMaker from '../core/FactoryMaker';
-import MediaPlayerEvents from '../streaming/MediaPlayerEvents';
+import FragmentRequest from '../streaming/vo/FragmentRequest.js';
+import {HTTPRequest} from '../streaming/vo/metrics/HTTPRequest.js';
+import FactoryMaker from '../core/FactoryMaker.js';
+import MediaPlayerEvents from '../streaming/MediaPlayerEvents.js';
 import {
     replaceIDForTemplate,
     replaceTokenForTemplate,
     unescapeDollarsInTemplate
-} from './utils/SegmentsUtils';
-import DashConstants from './constants/DashConstants';
+} from './utils/SegmentsUtils.js';
+import DashConstants from './constants/DashConstants.js';
 
 
 const DEFAULT_ADJUST_SEEK_TIME_THRESHOLD = 0.5;
@@ -99,13 +99,15 @@ function DashHandler(config) {
     function _setRequestUrl(request, destination, representation) {
         const baseURL = baseURLController.resolve(representation.path);
         let url,
-            serviceLocation;
+            serviceLocation,
+            queryParams = {};
 
         if (!baseURL || (destination === baseURL.url) || (!urlUtils.isRelative(destination))) {
             url = destination;
         } else {
             url = baseURL.url;
             serviceLocation = baseURL.serviceLocation;
+            queryParams = baseURL.queryParams;
 
             if (destination) {
                 url = urlUtils.resolve(destination, url);
@@ -118,12 +120,15 @@ function DashHandler(config) {
 
         request.url = url;
         request.serviceLocation = serviceLocation;
+        request.queryParams = queryParams;
 
         return true;
     }
 
     function getInitRequest(mediaInfo, representation) {
-        if (!representation) return null;
+        if (!representation) {
+            return null;
+        }
         return _generateInitRequest(mediaInfo, representation, getType());
     }
 
@@ -137,9 +142,7 @@ function DashHandler(config) {
         request.range = representation.range;
         request.availabilityStartTime = timelineConverter.calcAvailabilityStartTimeFromPresentationTime(presentationStartTime, representation, isDynamicManifest);
         request.availabilityEndTime = timelineConverter.calcAvailabilityEndTimeFromPresentationTime(presentationStartTime + period.duration, representation, isDynamicManifest);
-        request.quality = representation.index;
-        request.mediaInfo = mediaInfo;
-        request.representationId = representation.id;
+        request.representation = representation;
 
         if (_setRequestUrl(request, representation.initialization, representation)) {
             request.url = replaceTokenForTemplate(request.url, 'Bandwidth', representation.bandwidth);
@@ -154,7 +157,7 @@ function DashHandler(config) {
 
         const request = new FragmentRequest();
         const representation = segment.representation;
-        const bandwidth = representation.adaptation.period.mpd.manifest.Period_asArray[representation.adaptation.period.index].AdaptationSet_asArray[representation.adaptation.index].Representation_asArray[representation.index].bandwidth;
+        const bandwidth = representation.bandwidth;
         let url = segment.media;
 
         url = replaceTokenForTemplate(url, 'Number', segment.replacementNumber);
@@ -164,6 +167,7 @@ function DashHandler(config) {
         url = unescapeDollarsInTemplate(url);
 
         request.mediaType = getType();
+        request.bandwidth = representation.bandwidth;
         request.type = HTTPRequest.MEDIA_SEGMENT_TYPE;
         request.range = segment.mediaRange;
         request.startTime = segment.presentationStartTime;
@@ -174,11 +178,9 @@ function DashHandler(config) {
         request.availabilityEndTime = segment.availabilityEndTime;
         request.availabilityTimeComplete = representation.availabilityTimeComplete;
         request.wallStartTime = segment.wallStartTime;
-        request.quality = representation.index;
         request.index = segment.index;
-        request.mediaInfo = mediaInfo;
         request.adaptationIndex = representation.adaptation.index;
-        request.representationId = representation.id;
+        request.representation = representation;
 
         if (_setRequestUrl(request, url, representation)) {
             return request;
@@ -261,7 +263,9 @@ function DashHandler(config) {
             indexToRequest,
             lastSegment ? lastSegment.mediaStartTime : -1
         );
-        if (!segment) return null;
+        if (!segment) {
+            return null;
+        }
         request = _getRequestForSegment(mediaInfo, segment);
         return request;
     }
@@ -273,14 +277,27 @@ function DashHandler(config) {
      * @return {FragmentRequest|null}
      */
     function getNextSegmentRequest(mediaInfo, representation) {
-        let request = null;
-
         if (!representation || !representation.segmentInfoType) {
             return null;
         }
 
         let indexToRequest = lastSegment ? lastSegment.index + 1 : 0;
 
+        return _getRequest(mediaInfo, representation, indexToRequest);
+    }
+
+    function repeatSegmentRequest(mediaInfo, representation) {
+        if (!representation || !representation.segmentInfoType) {
+            return null;
+        }
+
+        let indexToRequest = lastSegment ? lastSegment.index : 0;
+
+        return _getRequest(mediaInfo, representation, indexToRequest);
+    }
+
+    function _getRequest(mediaInfo, representation, indexToRequest) {
+        let request = null;
         const segment = segmentsController.getSegmentByIndex(representation, indexToRequest, lastSegment ? lastSegment.mediaStartTime : -1);
 
         // No segment found
@@ -307,6 +324,7 @@ function DashHandler(config) {
      * @param {object} mediaInfo
      * @param {object} representation
      * @param {number} targetThreshold
+     * @return {number}
      */
     function getValidTimeAheadOfTargetTime(time, mediaInfo, representation, targetThreshold) {
         try {
@@ -387,18 +405,19 @@ function DashHandler(config) {
     }
 
     instance = {
-        initialize,
-        getStreamId,
-        getType,
-        getStreamInfo,
-        getInitRequest,
-        getSegmentRequestForTime,
         getCurrentIndex,
+        getInitRequest,
         getNextSegmentRequest,
-        isLastSegmentRequested,
-        reset,
         getNextSegmentRequestIdempotent,
-        getValidTimeAheadOfTargetTime
+        getSegmentRequestForTime,
+        getStreamId,
+        getStreamInfo,
+        getType,
+        getValidTimeAheadOfTargetTime,
+        initialize,
+        isLastSegmentRequested,
+        repeatSegmentRequest,
+        reset,
     };
 
     setup();

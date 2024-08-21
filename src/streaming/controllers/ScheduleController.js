@@ -28,14 +28,14 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import Constants from '../constants/Constants';
-import FragmentModel from '../models/FragmentModel';
-import EventBus from '../../core/EventBus';
-import Events from '../../core/events/Events';
-import FactoryMaker from '../../core/FactoryMaker';
-import Debug from '../../core/Debug';
-import MetricsConstants from '../constants/MetricsConstants';
-import MediaPlayerEvents from '../MediaPlayerEvents';
+import Constants from '../constants/Constants.js';
+import FragmentModel from '../models/FragmentModel.js';
+import EventBus from '../../core/EventBus.js';
+import Events from '../../core/events/Events.js';
+import FactoryMaker from '../../core/FactoryMaker.js';
+import Debug from '../../core/Debug.js';
+import MetricsConstants from '../constants/MetricsConstants.js';
+import MediaPlayerEvents from '../MediaPlayerEvents.js';
 
 function ScheduleController(config) {
 
@@ -50,20 +50,20 @@ function ScheduleController(config) {
     const textController = config.textController;
     const type = config.type;
     const bufferController = config.bufferController;
+    const representationController = config.representationController
     const settings = config.settings;
 
     let instance,
         streamInfo,
         logger,
-        currentRepresentationInfo,
         timeToLoadDelay,
         scheduleTimeout,
         hasVideoTrack,
         lastFragmentRequest,
-        topQualityIndex,
-        lastInitializedQuality,
+        lastInitializedRepresentationId,
         switchTrack,
         initSegmentRequired,
+        managedMediaSourceAllowsRequest,
         checkPlaybackQuality;
 
     function setup() {
@@ -75,11 +75,20 @@ function ScheduleController(config) {
     function initialize(_hasVideoTrack) {
         hasVideoTrack = _hasVideoTrack;
 
-        eventBus.on(Events.BYTES_APPENDED_END_FRAGMENT, _onBytesAppended, instance);
         eventBus.on(Events.URL_RESOLUTION_FAILED, _onURLResolutionFailed, instance);
         eventBus.on(MediaPlayerEvents.PLAYBACK_STARTED, _onPlaybackStarted, instance);
         eventBus.on(MediaPlayerEvents.PLAYBACK_RATE_CHANGED, _onPlaybackRateChanged, instance);
         eventBus.on(MediaPlayerEvents.PLAYBACK_TIME_UPDATED, _onPlaybackTimeUpdated, instance);
+        eventBus.on(MediaPlayerEvents.MANAGED_MEDIA_SOURCE_START_STREAMING, _onManagedMediaSourceStartStreaming, instance);
+        eventBus.on(MediaPlayerEvents.MANAGED_MEDIA_SOURCE_END_STREAMING, _onManagedMediaSourceEndStreaming, instance);
+    }
+
+    function _onManagedMediaSourceStartStreaming() {
+        managedMediaSourceAllowsRequest = true;
+    }
+
+    function _onManagedMediaSourceEndStreaming() {
+        managedMediaSourceAllowsRequest = false;
     }
 
     function getType() {
@@ -90,12 +99,12 @@ function ScheduleController(config) {
         return streamInfo.id;
     }
 
-    function setCurrentRepresentation(representationInfo) {
-        currentRepresentationInfo = representationInfo;
-    }
-
     function startScheduleTimer(value) {
-        if (bufferController.getIsBufferingCompleted()) return;
+
+        //return if both buffering and playback have ended
+        if (bufferController.getIsBufferingCompleted()) {
+            return;
+        }
 
         clearScheduleTimer();
         const timeoutValue = !isNaN(value) ? value : 0;
@@ -107,19 +116,6 @@ function ScheduleController(config) {
             clearTimeout(scheduleTimeout);
             scheduleTimeout = null;
         }
-    }
-
-    function hasTopQualityChanged() {
-        const streamId = streamInfo.id;
-        const newTopQualityIndex = abrController.getMaxAllowedIndexFor(type, streamId);
-
-        if (isNaN(topQualityIndex) || topQualityIndex != newTopQualityIndex) {
-            logger.info('Top quality ' + type + ' index has changed from ' + topQualityIndex + ' to ' + newTopQualityIndex);
-            topQualityIndex = newTopQualityIndex;
-            return true;
-        }
-        return false;
-
     }
 
     /**
@@ -148,7 +144,7 @@ function ScheduleController(config) {
                 startScheduleTimer(playbackController.getLowLatencyModeEnabled() ? settings.get().streaming.scheduling.lowLatencyTimeout : settings.get().streaming.scheduling.defaultTimeout);
             }
         } catch (e) {
-            startScheduleTimer(playbackController.getLowLatencyModeEnabled()  ? settings.get().streaming.scheduling.lowLatencyTimeout : settings.get().streaming.scheduling.defaultTimeout);
+            startScheduleTimer(playbackController.getLowLatencyModeEnabled() ? settings.get().streaming.scheduling.lowLatencyTimeout : settings.get().streaming.scheduling.defaultTimeout);
         }
     }
 
@@ -157,16 +153,18 @@ function ScheduleController(config) {
      * @private
      */
     function _getNextFragment() {
+        const currentRepresentation = representationController.getCurrentRepresentation();
+
         // A quality changed occured or we are switching the AdaptationSet. In that case we need to load a new init segment
-        if (initSegmentRequired || currentRepresentationInfo.quality !== lastInitializedQuality || switchTrack) {
+        if (initSegmentRequired || currentRepresentation.id !== lastInitializedRepresentationId || switchTrack) {
             if (switchTrack) {
-                logger.debug('Switch track for ' + type + ', representation id = ' + currentRepresentationInfo.id);
+                logger.debug('Switch track for ' + type + ', representation id = ' + currentRepresentation.id);
                 switchTrack = false;
             } else {
-                logger.debug('Quality has changed, get init request for representationid = ' + currentRepresentationInfo.id);
+                logger.debug('Quality has changed, get init request for representationid = ' + currentRepresentation.id);
             }
             eventBus.trigger(Events.INIT_FRAGMENT_NEEDED,
-                { representationId: currentRepresentationInfo.id, sender: instance },
+                { representationId: currentRepresentation.id, sender: instance },
                 { streamId: streamInfo.id, mediaType: type }
             );
             checkPlaybackQuality = false;
@@ -193,7 +191,7 @@ function ScheduleController(config) {
     function _shouldClearScheduleTimer() {
         try {
             return (((type === Constants.TEXT) && !textController.isTextEnabled()) ||
-                    (playbackController.isPaused() && (!playbackController.getStreamController().getInitialPlayback() || !playbackController.getStreamController().getAutoPlay()) && !settings.get().streaming.scheduling.scheduleWhilePaused));
+                (playbackController.isPaused() && (!playbackController.getStreamController().getInitialPlayback() || !playbackController.getStreamController().getAutoPlay()) && !settings.get().streaming.scheduling.scheduleWhilePaused));
         } catch (e) {
             return false;
         }
@@ -206,7 +204,11 @@ function ScheduleController(config) {
      */
     function _shouldScheduleNextRequest() {
         try {
-            return currentRepresentationInfo && (isNaN(lastInitializedQuality) || switchTrack || hasTopQualityChanged() || _shouldBuffer());
+            if (!managedMediaSourceAllowsRequest) {
+                return false;
+            }
+            const currentRepresentation = representationController.getCurrentRepresentation();
+            return currentRepresentation && (lastInitializedRepresentationId == null || switchTrack || _shouldBuffer());
         } catch (e) {
             return false;
         }
@@ -218,7 +220,8 @@ function ScheduleController(config) {
      * @private
      */
     function _shouldBuffer() {
-        if (!type || !currentRepresentationInfo) {
+        const currentRepresentation = representationController.getCurrentRepresentation();
+        if (!type || !currentRepresentation) {
             return true;
         }
         const bufferLevel = dashMetrics.getCurrentBufferLevel(type);
@@ -231,8 +234,9 @@ function ScheduleController(config) {
      */
     function getBufferTarget() {
         let bufferTarget = NaN;
+        const currentRepresentation = representationController.getCurrentRepresentation();
 
-        if (!type || !currentRepresentationInfo) {
+        if (!type || !currentRepresentation) {
             return bufferTarget;
         }
 
@@ -255,13 +259,14 @@ function ScheduleController(config) {
     function _getBufferTargetForFragmentedText() {
         try {
             if (textController.isTextEnabled()) {
-                if (isNaN(currentRepresentationInfo.fragmentDuration)) { //fragmentDuration of currentRepresentationInfo is not defined,
+                const currentRepresentation = representationController.getCurrentRepresentation();
+                if (isNaN(currentRepresentation.fragmentDuration)) {
                     // call metrics function to have data in the latest scheduling info...
                     // if no metric, returns 0. In this case, rule will return false.
                     const schedulingInfo = dashMetrics.getCurrentSchedulingInfo(MetricsConstants.SCHEDULING_INFO);
                     return schedulingInfo ? schedulingInfo.duration : 0;
                 } else {
-                    return currentRepresentationInfo.fragmentDuration;
+                    return currentRepresentation.fragmentDuration;
                 }
             } else { // text is disabled, rule will return false
                 return 0;
@@ -279,14 +284,15 @@ function ScheduleController(config) {
     function _getBufferTargetForAudio() {
         try {
             const videoBufferLevel = dashMetrics.getCurrentBufferLevel(Constants.VIDEO);
+            const currentRepresentation = representationController.getCurrentRepresentation();
             // For multiperiod we need to consider that audio and video segments might have different durations.
             // This can lead to scenarios in which we completely buffered the video segments and the video buffer level for the current period is not changing anymore. However we might still need a small audio segment to finish buffering audio as well.
             // If we set the buffer time of audio equal to the video buffer time scheduling for the remaining audio segment will only be triggered when audio fragmentDuration > videoBufferLevel. That will delay preloading of the upcoming period.
             // Should find a better solution than just adding 1
-            if (isNaN(currentRepresentationInfo.fragmentDuration)) {
+            if (isNaN(currentRepresentation.fragmentDuration)) {
                 return videoBufferLevel + 1;
             } else {
-                return Math.max(videoBufferLevel + 1, currentRepresentationInfo.fragmentDuration);
+                return Math.max(videoBufferLevel + 1, currentRepresentation.fragmentDuration);
             }
         } catch (e) {
             return 0;
@@ -294,21 +300,22 @@ function ScheduleController(config) {
     }
 
     /**
-     * Determines the generic buffer target, for instance for video tracks
+     * Determines the generic buffer target, for instance for video tracks or when we got an audio only stream
      * @return {number}
      * @private
      */
     function _getGenericBufferTarget() {
         try {
-            const streamInfo = currentRepresentationInfo.mediaInfo.streamInfo;
-            if (abrController.isPlayingAtTopQuality(streamInfo)) {
+            const currentRepresentation = representationController.getCurrentRepresentation();
+            const streamInfo = currentRepresentation.mediaInfo.streamInfo;
+            if (abrController.isPlayingAtTopQuality(currentRepresentation)) {
                 const isLongFormContent = streamInfo.manifestInfo.duration >= settings.get().streaming.buffer.longFormContentDurationThreshold;
                 return isLongFormContent ? settings.get().streaming.buffer.bufferTimeAtTopQualityLongForm : settings.get().streaming.buffer.bufferTimeAtTopQuality;
             } else {
-                return mediaPlayerModel.getStableBufferTime();
+                return mediaPlayerModel.getBufferTimeDefault();
             }
         } catch (e) {
-            return mediaPlayerModel.getStableBufferTime();
+            return mediaPlayerModel.getBufferTimeDefault();
         }
     }
 
@@ -316,7 +323,7 @@ function ScheduleController(config) {
         switchTrack = value;
     }
 
-    function getSwitchStrack() {
+    function getSwitchTrack() {
         return switchTrack;
     }
 
@@ -333,42 +340,27 @@ function ScheduleController(config) {
             })[0];
 
             if (item && playbackController.getTime() >= item.startTime) {
-                if ((!lastFragmentRequest.mediaInfo || (item.mediaInfo.type === lastFragmentRequest.mediaInfo.type && item.mediaInfo.id !== lastFragmentRequest.mediaInfo.id)) && trigger) {
+                if ((!lastFragmentRequest.representation || (item.representation.mediaInfo.type === lastFragmentRequest.representation.mediaInfo.type && item.representation.mediaInfo.index !== lastFragmentRequest.representation.mediaInfo.index)) && trigger) {
+                    logger.debug(`Track change rendered for streamId ${streamInfo.id} and type ${type}`);
                     eventBus.trigger(Events.TRACK_CHANGE_RENDERED, {
                         mediaType: type,
-                        oldMediaInfo: lastFragmentRequest.mediaInfo,
-                        newMediaInfo: item.mediaInfo,
+                        oldMediaInfo: lastFragmentRequest && lastFragmentRequest.representation && lastFragmentRequest.representation.mediaInfo ? lastFragmentRequest.representation.mediaInfo : null,
+                        newMediaInfo: item.representation.mediaInfo,
                         streamId: streamInfo.id
                     });
                 }
-                if ((item.quality !== lastFragmentRequest.quality || item.adaptationIndex !== lastFragmentRequest.adaptationIndex) && trigger) {
+                if ((!lastFragmentRequest.representation || (item.representation.id !== lastFragmentRequest.representation.id)) && trigger) {
                     logger.debug(`Quality change rendered for streamId ${streamInfo.id} and type ${type}`);
                     eventBus.trigger(Events.QUALITY_CHANGE_RENDERED, {
                         mediaType: type,
-                        oldQuality: lastFragmentRequest.quality,
-                        newQuality: item.quality,
+                        oldRepresentation: lastFragmentRequest.representation ? lastFragmentRequest.representation : null,
+                        newRepresentation: item.representation,
                         streamId: streamInfo.id
                     });
                 }
-                lastFragmentRequest = {
-                    mediaInfo: item.mediaInfo,
-                    quality: item.quality,
-                    adaptationIndex: item.adaptationIndex
-                };
+                lastFragmentRequest.representation = item.representation
             }
         }
-    }
-
-    function _onBytesAppended(e) {
-        logger.debug(`Appended bytes for ${e.mediaType} and stream id ${streamInfo.id}`);
-
-        // we save the last initialized quality. That way we make sure that the media fragments we are about to append match the init segment
-        if (isNaN(e.index) || isNaN(lastInitializedQuality)) {
-            lastInitializedQuality = e.quality;
-            logger.info('[' + type + '] ' + 'lastInitializedRepresentationInfo changed to ' + e.quality);
-        }
-
-        startScheduleTimer(0);
     }
 
     function _onURLResolutionFailed() {
@@ -402,26 +394,29 @@ function ScheduleController(config) {
         initSegmentRequired = value;
     }
 
+    function setLastInitializedRepresentationId(value) {
+        lastInitializedRepresentationId = value;
+    }
+
     function resetInitialSettings() {
         checkPlaybackQuality = true;
         timeToLoadDelay = 0;
-        lastInitializedQuality = NaN;
+        lastInitializedRepresentationId = null;
         lastFragmentRequest = {
-            mediaInfo: undefined,
-            quality: NaN,
-            adaptationIndex: NaN
+            representation: null,
         };
-        topQualityIndex = NaN;
         switchTrack = false;
         initSegmentRequired = false;
+        managedMediaSourceAllowsRequest = true;
     }
 
     function reset() {
-        eventBus.off(Events.BYTES_APPENDED_END_FRAGMENT, _onBytesAppended, instance);
         eventBus.off(Events.URL_RESOLUTION_FAILED, _onURLResolutionFailed, instance);
         eventBus.off(MediaPlayerEvents.PLAYBACK_STARTED, _onPlaybackStarted, instance);
         eventBus.off(MediaPlayerEvents.PLAYBACK_RATE_CHANGED, _onPlaybackRateChanged, instance);
         eventBus.off(MediaPlayerEvents.PLAYBACK_TIME_UPDATED, _onPlaybackTimeUpdated, instance);
+        eventBus.off(MediaPlayerEvents.MANAGED_MEDIA_SOURCE_START_STREAMING, _onManagedMediaSourceStartStreaming, instance);
+        eventBus.off(MediaPlayerEvents.MANAGED_MEDIA_SOURCE_END_STREAMING, _onManagedMediaSourceEndStreaming, instance);
 
         clearScheduleTimer();
         _completeQualityChange(false);
@@ -437,18 +432,18 @@ function ScheduleController(config) {
         initialize,
         getType,
         getStreamId,
-        setCurrentRepresentation,
         setTimeToLoadDelay,
         getTimeToLoadDelay,
         setSwitchTrack,
-        getSwitchStrack,
+        getSwitchTrack,
         startScheduleTimer,
         clearScheduleTimer,
         reset,
         getBufferTarget,
         getPlaybackController,
         setCheckPlaybackQuality,
-        setInitSegmentRequired
+        setInitSegmentRequired,
+        setLastInitializedRepresentationId,
     };
 
     setup();

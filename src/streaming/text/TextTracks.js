@@ -28,18 +28,16 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import Constants from '../constants/Constants';
-import EventBus from '../../core/EventBus';
-import Events from '../../core/events/Events';
-import MediaPlayerEvents from '../../streaming/MediaPlayerEvents';
-import FactoryMaker from '../../core/FactoryMaker';
-import Debug from '../../core/Debug';
+import Constants from '../constants/Constants.js';
+import EventBus from '../../core/EventBus.js';
+import Events from '../../core/events/Events.js';
+import MediaPlayerEvents from '../../streaming/MediaPlayerEvents.js';
+import FactoryMaker from '../../core/FactoryMaker.js';
+import Debug from '../../core/Debug.js';
 import {renderHTML} from 'imsc';
 
 const CUE_PROPS_TO_COMPARE = [
     'text',
-    'images',
-    'embeddedImages',
     'align',
     'fontSize',
     'id',
@@ -67,8 +65,8 @@ function TextTracks(config) {
     let instance,
         logger,
         Cue,
-        textTrackQueue,
-        nativeTrackElementArr,
+        textTrackInfos,
+        nativeTexttracks,
         currentTrackIdx,
         actualVideoLeft,
         actualVideoTop,
@@ -81,7 +79,9 @@ function TextTracks(config) {
         displayCCOnTop,
         previousISDState,
         topZIndex,
-        resizeObserver;
+        resizeObserver,
+        hasRequestAnimationFrame,
+        currentCaptionEventCue;
 
     function setup() {
         logger = Debug(context).getInstance().getLogger(instance);
@@ -93,8 +93,8 @@ function TextTracks(config) {
         }
 
         Cue = window.VTTCue || window.TextTrackCue;
-        textTrackQueue = [];
-        nativeTrackElementArr = [];
+        textTrackInfos = [];
+        nativeTexttracks = [];
         currentTrackIdx = -1;
         actualVideoLeft = 0;
         actualVideoTop = 0;
@@ -106,6 +106,7 @@ function TextTracks(config) {
         displayCCOnTop = false;
         topZIndex = 2147483647;
         previousISDState = null;
+        hasRequestAnimationFrame = ('requestAnimationFrame' in window);
 
         if (document.fullscreenElement !== undefined) {
             fullscreenAttribute = 'fullscreenElement'; // Standard and Edge
@@ -122,42 +123,24 @@ function TextTracks(config) {
         return streamInfo.id;
     }
 
-    function _createTrackForUserAgent(element) {
-        const kind = element.kind;
-        const label = element.id !== undefined ? element.id : element.lang;
-        const lang = element.lang;
-        const isTTML = element.isTTML;
-        const isEmbedded = element.isEmbedded;
-        const track = videoModel.addTextTrack(kind, label, lang, isTTML, isEmbedded);
-
-        return track;
-    }
-
-    function addTextTrack(textTrackInfoVO) {
-        textTrackQueue.push(textTrackInfoVO);
-    }
-
     function createTracks() {
-
         //Sort in same order as in manifest
-        textTrackQueue.sort(function (a, b) {
+        textTrackInfos.sort(function (a, b) {
             return a.index - b.index;
         });
 
         captionContainer = videoModel.getTTMLRenderingDiv();
         vttCaptionContainer = videoModel.getVttRenderingDiv();
         let defaultIndex = -1;
-        for (let i = 0; i < textTrackQueue.length; i++) {
-            const track = _createTrackForUserAgent(textTrackQueue[i]);
+        for (let i = 0; i < textTrackInfos.length; i++) {
+            const nativeTexttrack = _createNativeTextrackElement(textTrackInfos[i]);
 
             //used to remove tracks from video element when added manually
-            nativeTrackElementArr.push(track);
+            nativeTexttracks.push(nativeTexttrack);
 
-            if (textTrackQueue[i].defaultTrack) {
+            if (textTrackInfos[i].defaultTrack) {
                 // track.default is an object property identifier that is a reserved word
-                // The following jshint directive is used to suppressed the warning "Expected an identifier and instead saw 'default' (a reserved word)"
-                /*jshint -W024 */
-                track.default = true;
+                nativeTexttrack.default = true;
                 defaultIndex = i;
             }
 
@@ -166,14 +149,14 @@ function TextTracks(config) {
                 //each time a track is created, its mode should be showing by default
                 //sometime, it's not on Chrome
                 textTrack.mode = Constants.TEXT_SHOWING;
-                if (captionContainer && (textTrackQueue[i].isTTML || textTrackQueue[i].isEmbedded)) {
+                if (captionContainer && (textTrackInfos[i].isTTML || textTrackInfos[i].isEmbedded)) {
                     textTrack.renderingType = 'html';
                 } else {
                     textTrack.renderingType = 'default';
                 }
             }
 
-            addCaptions(i, 0, textTrackQueue[i].captionData);
+            addCaptions(i, 0, textTrackInfos[i].captionData);
             eventBus.trigger(MediaPlayerEvents.TEXT_TRACK_ADDED);
         }
 
@@ -192,10 +175,11 @@ function TextTracks(config) {
 
             eventBus.on(MediaPlayerEvents.PLAYBACK_METADATA_LOADED, onMetadataLoaded, this);
 
-            for (let idx = 0; idx < textTrackQueue.length; idx++) {
+            for (let idx = 0; idx < textTrackInfos.length; idx++) {
                 const videoTextTrack = getTrackByIdx(idx);
                 if (videoTextTrack) {
-                    videoTextTrack.mode = (idx === defaultIndex) ? Constants.TEXT_SHOWING : Constants.TEXT_HIDDEN;
+                    const dispatchForManualRendering = settings.get().streaming.text.dispatchForManualRendering;
+                    videoTextTrack.mode = (idx === defaultIndex && !dispatchForManualRendering) ? Constants.TEXT_SHOWING : Constants.TEXT_HIDDEN;
                     videoTextTrack.manualMode = (idx === defaultIndex) ? Constants.TEXT_SHOWING : Constants.TEXT_HIDDEN;
                 }
             }
@@ -203,9 +187,24 @@ function TextTracks(config) {
 
         eventBus.trigger(Events.TEXT_TRACKS_QUEUE_INITIALIZED, {
             index: currentTrackIdx,
-            tracks: textTrackQueue,
+            tracks: textTrackInfos,
             streamId: streamInfo.id
         });
+    }
+
+    function _createNativeTextrackElement(element) {
+        const kind = element.kind;
+        const label = element.id !== undefined ? element.id : element.lang;
+        const lang = element.lang;
+        const isTTML = element.isTTML;
+        const isEmbedded = element.isEmbedded;
+        const track = videoModel.addTextTrack(kind, label, lang, isTTML, isEmbedded);
+
+        return track;
+    }
+
+    function addTextTrackInfo(textTrackInfoVO) {
+        textTrackInfos.push(textTrackInfoVO);
     }
 
     function getVideoVisibleVideoSize(viewWidth, viewHeight, videoWidth, videoHeight, aspectRatio, use80Percent) {
@@ -390,51 +389,73 @@ function TextTracks(config) {
         }
     }
 
+    function _resolveImageSrc(cue, src) {
+        const imsc1ImgUrnTester = /^(urn:)(mpeg:[a-z0-9][a-z0-9-]{0,31}:)(subs:)([0-9]+)$/;
+        const smpteImgUrnTester = /^#(.*)$/;
+        if (imsc1ImgUrnTester.test(src)) {
+            const match = imsc1ImgUrnTester.exec(src);
+            const imageId = parseInt(match[4], 10) - 1;
+            const imageData = btoa(cue.images[imageId]);
+            const imageSrc = 'data:image/png;base64,' + imageData;
+            return imageSrc;
+        } else if (smpteImgUrnTester.test(src)) {
+            const match = smpteImgUrnTester.exec(src);
+            const imageId = match[1];
+            const imageSrc = 'data:image/png;base64,' + cue.embeddedImages[imageId];
+            return imageSrc;
+        } else {
+            return src;
+        }
+    }
+
     function _renderCaption(cue) {
         if (captionContainer) {
+            clearCaptionContainer.call(this);
+
             const finalCue = document.createElement('div');
             captionContainer.appendChild(finalCue);
-            previousISDState = renderHTML(cue.isd, finalCue, function (uri) {
-                const imsc1ImgUrnTester = /^(urn:)(mpeg:[a-z0-9][a-z0-9-]{0,31}:)(subs:)([0-9]+)$/;
-                const smpteImgUrnTester = /^#(.*)$/;
-                if (imsc1ImgUrnTester.test(uri)) {
-                    const match = imsc1ImgUrnTester.exec(uri);
-                    const imageId = parseInt(match[4], 10) - 1;
-                    const imageData = btoa(cue.images[imageId]);
-                    const dataUrl = 'data:image/png;base64,' + imageData;
-                    return dataUrl;
-                } else if (smpteImgUrnTester.test(uri)) {
-                    const match = smpteImgUrnTester.exec(uri);
-                    const imageId = match[1];
-                    const dataUrl = 'data:image/png;base64,' + cue.embeddedImages[imageId];
-                    return dataUrl;
-                } else {
-                    return null;
-                }
-            }, captionContainer.clientHeight, captionContainer.clientWidth, false/*displayForcedOnlyMode*/, function (err) {
-                logger.info('renderCaption :', err);
-                //TODO add ErrorHandler management
-            }, previousISDState, true /*enableRollUp*/);
+
+            previousISDState = renderHTML(
+                cue.isd,
+                finalCue,
+                function (src) {
+                    return _resolveImageSrc(cue, src)
+                },
+                captionContainer.clientHeight,
+                captionContainer.clientWidth,
+                settings.get().streaming.text.imsc.displayForcedOnlyMode,
+                function (err) {
+                    logger.info('renderCaption :', err) /*TODO: add ErrorHandler management*/
+                },
+                previousISDState,
+                settings.get().streaming.text.imsc.enableRollUp
+            );
             finalCue.id = cue.cueID;
             eventBus.trigger(MediaPlayerEvents.CAPTION_RENDERED, { captionDiv: finalCue, currentTrackIdx });
         }
     }
 
-    function _extendLastCue(cue, track) {
-        if (!track.cues || track.cues.length === 0) {
+    // Check that a new cue immediately follows the previous cue
+    function _areCuesAdjacent(cue, prevCue) {
+        if (!prevCue) {
             return false;
         }
-        const prevCue = track.cues[track.cues.length - 1];
         // Check previous cue endTime with current cue startTime
         // (should we consider an epsilon margin? for example to get around rounding issues)
-        if (prevCue.endTime !== cue.startTime) {
+        return prevCue.endTime >= cue.startTime;
+    }
+
+    // Check if cue content is identical. If it is, extend the previous cue.
+    function _extendLastCue(cue, prevCue) {
+        if (!settings.get().streaming.text.extendSegmentedCues) {
             return false;
         }
-        // Compare cues content
+
         if (!_cuesContentAreEqual(prevCue, cue, CUE_PROPS_TO_COMPARE)) {
             return false;
         }
-        prevCue.endTime = cue.endTime;
+
+        prevCue.endTime = Math.max(prevCue.endTime, cue.endTime);
         return true;
     }
 
@@ -444,8 +465,20 @@ function TextTracks(config) {
             if (JSON.stringify(cue1[key]) !== JSON.stringify(cue2[key])) {
                 return false;
             }
-        };
+        }
         return true;
+    }
+
+    function _resolveImagesInContents(cue, contents) {
+        if (!contents) {
+            return;
+        }
+        contents.forEach(c => {
+            if (c.kind && c.kind === 'image') {
+                c.src = _resolveImageSrc(cue, c.src);
+            }
+            _resolveImagesInContents(cue, c.contents);
+        });
     }
 
     /*
@@ -453,6 +486,7 @@ function TextTracks(config) {
      */
     function addCaptions(trackIdx, timeOffset, captionData) {
         const track = getTrackByIdx(trackIdx);
+        const dispatchForManualRendering = settings.get().streaming.text.dispatchForManualRendering;
 
         if (!track) {
             return;
@@ -463,16 +497,22 @@ function TextTracks(config) {
         }
 
         for (let item = 0; item < captionData.length; item++) {
-            let cue;
+            let cue = null;
             const currentItem = captionData[item];
 
             track.cellResolution = currentItem.cellResolution;
             track.isFromCEA608 = currentItem.isFromCEA608;
 
             if (!isNaN(currentItem.start) && !isNaN(currentItem.end)) {
-                cue = currentItem.type === 'html' && captionContainer ? _handleHtmlCaption(currentItem, timeOffset, track)
-                    : currentItem.data ? _handleNonHtmlCaption(currentItem, timeOffset, track) : null;
+                if (dispatchForManualRendering) {
+                    cue = _handleCaptionEvents(currentItem, timeOffset);
+                } else if (_isHTMLCue(currentItem) && captionContainer) {
+                    cue = _handleHtmlCaption(currentItem, timeOffset, track)
+                } else if (currentItem.data) {
+                    cue = _handleNonHtmlCaption(currentItem, timeOffset, track)
+                }
             }
+
             try {
                 if (cue) {
                     if (!cueInTrack(track, cue)) {
@@ -482,39 +522,89 @@ function TextTracks(config) {
                             }
                             track.manualCueList.push(cue);
                         } else {
-                            if (!_extendLastCue(cue, track)) {
-                                track.addCue(cue);
+                            // Handle adjacent cues
+                            let prevCue;
+                            if (track.cues && track.cues.length !== 0) {
+                                prevCue = track.cues[track.cues.length - 1];
+                            }
+
+                            if (_areCuesAdjacent(cue, prevCue)) {
+                                if (!_extendLastCue(cue, prevCue)) {
+                                    /* If cues are adjacent but not identical (extended), let the render function of the next cue
+                                     * clear up the captionsContainer so removal and appending are instantaneous.
+                                     * Only do this for imsc subs (where isd is present).
+                                     */
+                                    if (prevCue.isd) {
+                                        prevCue.onexit = function () {
+                                        };
+                                    }
+                                    // If cues are added when the track is disabled they can still persist in memory
+                                    if (track.mode !== Constants.TEXT_DISABLED) {
+                                        track.addCue(cue);
+                                    }
+                                }
+                            } else {
+                                if (track.mode !== Constants.TEXT_DISABLED) {
+                                    track.addCue(cue);
+                                }
                             }
                         }
-
                     }
+
+                    // Remove old cues
+                    const bufferToKeep = settings.get().streaming.buffer.bufferToKeep;
+                    const currentTime = videoModel.getTime();
+                    _deleteOutdatedTrackCues(track, 0, currentTime - bufferToKeep);
                 } else {
-                    logger.error('impossible to display subtitles.');
+                    logger.error('Impossible to display subtitles. You might have missed setting a TTML rendering div via player.attachTTMLRenderingDiv(TTMLRenderingDiv)');
                 }
             } catch (e) {
                 // Edge crash, delete everything and start adding again
                 // @see https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/11979877/
-                deleteTrackCues(track);
+                _deleteTrackCues(track);
                 track.addCue(cue);
                 throw e;
             }
         }
     }
 
+    function _handleCaptionEvents(currentItem, timeOffset) {
+        let cue = _getCueInformation(currentItem, timeOffset)
+
+        cue.onenter = function () {
+            // HTML Tracks don't trigger the onexit event when a new cue is entered,
+            // we need to manually trigger it
+            if (_isHTMLCue(currentItem) && currentCaptionEventCue && currentCaptionEventCue.cueID !== cue.cueID) {
+                _triggerCueExit(currentCaptionEventCue);
+            }
+            // We need to delete the type attribute to be able to dispatch via th event bus
+            delete cue.type;
+
+            currentCaptionEventCue = cue;
+            _triggerCueEnter(cue);
+        }
+
+        cue.onexit = function () {
+            _triggerCueExit(cue);
+            currentCaptionEventCue = null;
+        }
+
+        return cue;
+    }
+
+    function _triggerCueEnter(cue) {
+        eventBus.trigger(MediaPlayerEvents.CUE_ENTER, cue);
+    }
+
+    function _triggerCueExit(cue) {
+        eventBus.trigger(MediaPlayerEvents.CUE_EXIT, {
+            cueID: cue.cueID
+        });
+    }
+
     function _handleHtmlCaption(currentItem, timeOffset, track) {
         const self = this;
-        let cue = new Cue(currentItem.start + timeOffset, currentItem.end + timeOffset, '');
-        cue.cueHTMLElement = currentItem.cueHTMLElement;
-        cue.isd = currentItem.isd;
-        cue.images = currentItem.images;
-        cue.embeddedImages = currentItem.embeddedImages;
-        cue.cueID = currentItem.cueID;
-        cue.scaleCue = _scaleCue.bind(self);
-        //useful parameters for cea608 subtitles, not for TTML one.
-        cue.cellResolution = currentItem.cellResolution;
-        cue.lineHeight = currentItem.lineHeight;
-        cue.linePadding = currentItem.linePadding;
-        cue.fontSize = currentItem.fontSize;
+        let cue = _getCueInformation(currentItem, timeOffset)
 
         captionContainer.style.left = actualVideoLeft + 'px';
         captionContainer.style.top = actualVideoTop + 'px';
@@ -524,7 +614,12 @@ function TextTracks(config) {
         cue.onenter = function () {
             if (track.mode === Constants.TEXT_SHOWING) {
                 if (this.isd) {
-                    _renderCaption(this);
+                    if (hasRequestAnimationFrame) {
+                        // Ensure everything in _renderCaption happens in the same frame
+                        requestAnimationFrame(() => _renderCaption(this));
+                    } else {
+                        _renderCaption(this)
+                    }
                     logger.debug('Cue enter id:' + this.cueID);
                 } else {
                     captionContainer.appendChild(this.cueHTMLElement);
@@ -537,6 +632,7 @@ function TextTracks(config) {
             }
         };
 
+        // For imsc subs, this could be reassigned to not do anything if there is a cue that immediately follows this one
         cue.onexit = function () {
             if (captionContainer) {
                 const divs = captionContainer.childNodes;
@@ -554,9 +650,7 @@ function TextTracks(config) {
     }
 
     function _handleNonHtmlCaption(currentItem, timeOffset, track) {
-        let cue = new Cue(currentItem.start - timeOffset, currentItem.end - timeOffset, currentItem.data);
-
-        cue.cueID = `${cue.startTime}_${cue.endTime}`;
+        let cue = _getCueInformation(currentItem, timeOffset)
         cue.isActive = false;
 
         if (currentItem.styles) {
@@ -566,6 +660,9 @@ function TextTracks(config) {
                 }
                 if (currentItem.styles.line !== undefined && 'line' in cue) {
                     cue.line = currentItem.styles.line;
+                }
+                if (currentItem.styles.snapToLines !== undefined && 'snapToLines' in cue) {
+                    cue.snapToLines = currentItem.styles.snapToLines;
                 }
                 if (currentItem.styles.position !== undefined && 'position' in cue) {
                     cue.position = currentItem.styles.position;
@@ -587,6 +684,46 @@ function TextTracks(config) {
         return cue;
     }
 
+    function _isHTMLCue(cue) {
+        return (cue.type === 'html')
+    }
+
+    function _getCueInformation(currentItem, timeOffset) {
+        if (_isHTMLCue(currentItem)) {
+            return _getCueInformationForHtml(currentItem, timeOffset);
+        }
+
+        return _getCueInformationForNonHtml(currentItem, timeOffset);
+    }
+
+    function _getCueInformationForHtml(currentItem, timeOffset) {
+        let cue = new Cue(currentItem.start + timeOffset, currentItem.end + timeOffset, '');
+        cue.cueHTMLElement = currentItem.cueHTMLElement;
+        cue.isd = currentItem.isd;
+        cue.images = currentItem.images;
+        cue.embeddedImages = currentItem.embeddedImages;
+        cue.cueID = currentItem.cueID;
+        cue.scaleCue = _scaleCue.bind(self);
+        //useful parameters for cea608 subtitles, not for TTML one.
+        cue.cellResolution = currentItem.cellResolution;
+        cue.lineHeight = currentItem.lineHeight;
+        cue.linePadding = currentItem.linePadding;
+        cue.fontSize = currentItem.fontSize;
+
+        // Resolve images sources
+        if (cue.isd) {
+            _resolveImagesInContents(cue, cue.isd.contents);
+        }
+
+        return cue;
+    }
+
+    function _getCueInformationForNonHtml(currentItem, timeOffset) {
+        let cue = new Cue(currentItem.start - timeOffset, currentItem.end - timeOffset, currentItem.data);
+        cue.cueID = `${cue.startTime}_${cue.endTime}`;
+        return cue;
+    }
+
     function manualCueProcessing(time) {
         const activeTracks = _getManualActiveTracks();
 
@@ -594,27 +731,38 @@ function TextTracks(config) {
             const targetTrack = activeTracks[0];
             const cues = targetTrack.manualCueList;
 
-
             if (cues && cues.length > 0) {
                 cues.forEach((cue) => {
                     // Render cue if target time is reached and not in active state
                     if (cue.startTime <= time && cue.endTime >= time && !cue.isActive) {
                         cue.isActive = true;
-                        // eslint-disable-next-line no-undef
-                        WebVTT.processCues(window, [cue], vttCaptionContainer, cue.cueID);
+                        if (settings.get().streaming.text.dispatchForManualRendering) {
+                            _triggerCueEnter(cue);
+                        } else {
+                            // eslint-disable-next-line no-undef
+                            WebVTT.processCues(window, [cue], vttCaptionContainer, cue.cueID);
+                        }
                     } else if (cue.isActive && (cue.startTime > time || cue.endTime < time)) {
                         cue.isActive = false;
-                        if (vttCaptionContainer) {
-                            const divs = vttCaptionContainer.childNodes;
-                            for (let i = 0; i < divs.length; ++i) {
-                                if (divs[i].id === cue.cueID) {
-                                    vttCaptionContainer.removeChild(divs[i]);
-                                    --i;
-                                }
-                            }
+                        if (settings.get().streaming.text.dispatchForManualRendering) {
+                            _triggerCueExit(cue);
+                        } else {
+                            _removeManualCue(cue);
                         }
                     }
                 })
+            }
+        }
+    }
+
+    function _removeManualCue(cue) {
+        if (vttCaptionContainer) {
+            const divs = vttCaptionContainer.childNodes;
+            for (let i = 0; i < divs.length; ++i) {
+                if (divs[i].id === cue.cueID) {
+                    vttCaptionContainer.removeChild(divs[i]);
+                    --i;
+                }
             }
         }
     }
@@ -631,7 +779,9 @@ function TextTracks(config) {
                 cues.forEach((cue) => {
                     if (cue.isActive) {
                         cue.isActive = false;
-                        if (vttCaptionContainer) {
+                        if (settings.get().streaming.text.dispatchForManualRendering) {
+                            _triggerCueExit(cue);
+                        } else if (vttCaptionContainer) {
                             const divs = vttCaptionContainer.childNodes;
                             for (let i = 0; i < divs.length; ++i) {
                                 if (divs[i].id === cue.cueID) {
@@ -659,8 +809,8 @@ function TextTracks(config) {
     }
 
     function getTrackByIdx(idx) {
-        return idx >= 0 && textTrackQueue[idx] ?
-            videoModel.getTextTrack(textTrackQueue[idx].kind, textTrackQueue[idx].id, textTrackQueue[idx].lang, textTrackQueue[idx].isTTML, textTrackQueue[idx].isEmbedded) : null;
+        return idx >= 0 && textTrackInfos[idx] ?
+            videoModel.getTextTrack(textTrackInfos[idx].kind, textTrackInfos[idx].id, textTrackInfos[idx].lang, textTrackInfos[idx].isTTML, textTrackInfos[idx].isEmbedded) : null;
     }
 
     function getCurrentTrackIdx() {
@@ -669,8 +819,8 @@ function TextTracks(config) {
 
     function getTrackIdxForId(trackId) {
         let idx = -1;
-        for (let i = 0; i < textTrackQueue.length; i++) {
-            if (textTrackQueue[i].id === trackId) {
+        for (let i = 0; i < textTrackInfos.length; i++) {
+            if (textTrackInfos[i].id === trackId) {
                 idx = i;
                 break;
             }
@@ -719,7 +869,9 @@ function TextTracks(config) {
     }
 
     function cueInTrack(track, cue) {
-        if (!track.cues) return false;
+        if (!track.cues) {
+            return false;
+        }
         for (let i = 0; i < track.cues.length; i++) {
             if ((track.cues[i].startTime === cue.startTime) &&
                 (track.cues[i].endTime === cue.endTime)) {
@@ -730,42 +882,89 @@ function TextTracks(config) {
     }
 
     function cueInRange(cue, start, end, strict = true) {
+        if (!cue) {
+            return false
+        }
         return (isNaN(start) || (strict ? cue.startTime : cue.endTime) >= start) && (isNaN(end) || (strict ? cue.endTime : cue.startTime) <= end);
     }
 
-    function deleteTrackCues(track, start, end, strict = true) {
-        if (track.cues) {
-            const cues = track.cues;
+    function _deleteOutdatedTrackCues(track, start, end) {
+
+        if (end < start) {
+            return;
+        }
+
+        if (track && (track.cues || track.manualCueList)) {
+            const mode = track.cues && track.cues.length > 0 ? 'native' : 'custom';
+            const cues = mode === 'native' ? track.cues : track.manualCueList;
+
+            if (!cues || cues.length === 0) {
+                return;
+            }
             const lastIdx = cues.length - 1;
 
             for (let r = lastIdx; r >= 0; r--) {
-                if (cueInRange(cues[r], start, end, strict)) {
-                    if (cues[r].onexit) {
-                        cues[r].onexit();
+                if (cueInRange(cues[r], start, end, true) && !_isCueActive(cues[r])) {
+                    if (mode === 'native') {
+                        track.removeCue(cues[r]);
+                    } else {
+                        _removeManualCue(cues[r]);
+                        delete track.manualCueList[r]
                     }
-                    track.removeCue(cues[r]);
                 }
             }
         }
     }
 
+    function _deleteTrackCues(track, start, end, strict = true) {
+        if (track && (track.cues || track.manualCueList)) {
+            const mode = track.cues && track.cues.length > 0 ? 'native' : 'custom';
+            const cues = mode === 'native' ? track.cues : track.manualCueList;
+
+            if (!cues || cues.length === 0) {
+                return;
+            }
+            const lastIdx = cues.length - 1;
+
+            for (let r = lastIdx; r >= 0; r--) {
+                if (cueInRange(cues[r], start, end, strict)) {
+                    if (mode === 'native') {
+                        if (cues[r].onexit) {
+                            cues[r].onexit();
+                        }
+                        track.removeCue(cues[r]);
+                    } else {
+                        _removeManualCue(cues[r]);
+                        delete track.manualCueList[r]
+                    }
+                }
+            }
+        }
+    }
+
+    function _isCueActive(cue) {
+        const currentTime = videoModel.getTime();
+
+        return currentTime >= cue.startTime && currentTime <= cue.endTime
+    }
+
     function deleteCuesFromTrackIdx(trackIdx, start, end) {
         const track = getTrackByIdx(trackIdx);
         if (track) {
-            deleteTrackCues(track, start, end);
+            _deleteTrackCues(track, start, end);
         }
     }
 
     function deleteAllTextTracks() {
-        const ln = nativeTrackElementArr ? nativeTrackElementArr.length : 0;
+        const ln = nativeTexttracks ? nativeTexttracks.length : 0;
         for (let i = 0; i < ln; i++) {
             const track = getTrackByIdx(i);
             if (track) {
-                deleteTrackCues.call(this, track, streamInfo.start, streamInfo.start + streamInfo.duration, false);
+                _deleteTrackCues.call(this, track, streamInfo.start, streamInfo.start + streamInfo.duration, false);
             }
         }
-        nativeTrackElementArr = [];
-        textTrackQueue = [];
+        nativeTexttracks = [];
+        textTrackInfos = [];
         if (videoSizeCheckInterval) {
             clearInterval(videoSizeCheckInterval);
             videoSizeCheckInterval = null;
@@ -776,11 +975,6 @@ function TextTracks(config) {
         }
         currentTrackIdx = -1;
         clearCaptionContainer.call(this);
-    }
-
-    function deleteTextTrack(idx) {
-        videoModel.removeChild(nativeTrackElementArr[idx]);
-        nativeTrackElementArr.splice(idx, 1);
     }
 
     /* Set native cue style to transparent background to avoid it being displayed. */
@@ -836,26 +1030,30 @@ function TextTracks(config) {
         }
     }
 
-    function getCurrentTrackInfo() {
-        return textTrackQueue[currentTrackIdx];
+    function getCurrentTextTrackInfo() {
+        return textTrackInfos[currentTrackIdx];
+    }
+
+    function getTextTrackInfos() {
+        return textTrackInfos
     }
 
     instance = {
-        initialize,
-        getStreamId,
-        addTextTrack,
         addCaptions,
+        addTextTrackInfo,
         createTracks,
-        getCurrentTrackIdx,
-        setCurrentTrackIdx,
-        getTrackIdxForId,
-        getCurrentTrackInfo,
-        setModeForTrackIdx,
-        deleteCuesFromTrackIdx,
         deleteAllTextTracks,
-        deleteTextTrack,
+        deleteCuesFromTrackIdx,
+        disableManualTracks,
+        getCurrentTrackIdx,
+        getCurrentTextTrackInfo,
+        getStreamId,
+        getTextTrackInfos,
+        getTrackIdxForId,
+        initialize,
         manualCueProcessing,
-        disableManualTracks
+        setCurrentTrackIdx,
+        setModeForTrackIdx,
     };
 
     setup();

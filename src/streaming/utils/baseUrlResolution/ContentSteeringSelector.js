@@ -29,15 +29,18 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-import FactoryMaker from '../../../core/FactoryMaker';
-import ContentSteeringController from '../../../dash/controllers/ContentSteeringController';
+import FactoryMaker from '../../../core/FactoryMaker.js';
+import ContentSteeringController from '../../../dash/controllers/ContentSteeringController.js';
+import EventBus from '../../../core/EventBus.js';
 
 function ContentSteeringSelector() {
 
     const context = this.context;
+    const eventBus = EventBus(context).getInstance();
     let instance,
         contentSteeringController,
-        blacklistController;
+        blacklistController,
+        blacklistResetTimeout = [];
 
     function setup() {
         contentSteeringController = ContentSteeringController(context).getInstance();
@@ -50,6 +53,7 @@ function ContentSteeringSelector() {
         if (config.contentSteeringController) {
             contentSteeringController = config.contentSteeringController;
         }
+        eventBus.on(config.addBlacklistEventName, _onAddBlackList, instance);
     }
 
     function selectBaseUrlIndex(data) {
@@ -58,26 +62,31 @@ function ContentSteeringSelector() {
         // In case we dont have a selected idx yet we consider the defaultServiceLocation
         if (isNaN(data.selectedIdx)) {
             const steeringDataFromMpd = contentSteeringController.getSteeringDataFromManifest();
-            if (steeringDataFromMpd && steeringDataFromMpd.defaultServiceLocation) {
-                steeringIndex = _findexIndexOfServiceLocation([steeringDataFromMpd.defaultServiceLocation], data.baseUrls);
+            if (steeringDataFromMpd && steeringDataFromMpd.defaultServiceLocationArray.length > 0) {
+                steeringIndex = _findexIndexOfServiceLocation(steeringDataFromMpd.defaultServiceLocationArray, data.baseUrls);
             }
         }
 
         // Search in the response data of the steering server
         const currentSteeringResponseData = contentSteeringController.getCurrentSteeringResponseData();
         if (data.baseUrls && data.baseUrls.length && currentSteeringResponseData &&
-            currentSteeringResponseData.serviceLocationPriority && currentSteeringResponseData.serviceLocationPriority.length) {
-            steeringIndex = _findexIndexOfServiceLocation(currentSteeringResponseData.serviceLocationPriority, data.baseUrls);
+            currentSteeringResponseData.pathwayPriority && currentSteeringResponseData.pathwayPriority.length) {
+            steeringIndex = _findexIndexOfServiceLocation(currentSteeringResponseData.pathwayPriority, data.baseUrls);
         }
 
         return steeringIndex;
     }
 
-    function _findexIndexOfServiceLocation(serviceLocationPriorities = [], baseUrls = []) {
+    function reset() {
+        blacklistResetTimeout.forEach(timer => clearTimeout(timer))
+        blacklistResetTimeout = []
+    }
+
+    function _findexIndexOfServiceLocation(pathwayPriority = [], baseUrls = []) {
         let i = 0;
         let steeringIndex = NaN;
-        while (i < serviceLocationPriorities.length) {
-            const curr = serviceLocationPriorities[i];
+        while (i < pathwayPriority.length) {
+            const curr = pathwayPriority[i];
             const idx = baseUrls.findIndex((elem) => {
                 return elem.serviceLocation && elem.serviceLocation === curr;
             })
@@ -90,9 +99,25 @@ function ContentSteeringSelector() {
         return steeringIndex;
     }
 
+    
+    function _onAddBlackList(e) {
+        const currentSteeringResponseData = contentSteeringController.getCurrentSteeringResponseData();
+        if (!currentSteeringResponseData) {
+            return
+        }
+        const entry = e.entry
+        const timer = setTimeout(() => {
+            blacklistController.remove(entry);
+            blacklistResetTimeout.splice(blacklistResetTimeout.indexOf(timer, 1))
+        }, currentSteeringResponseData.ttl * 1000);
+        blacklistResetTimeout.push(timer)
+    }
+
+
     instance = {
         selectBaseUrlIndex,
-        setConfig
+        setConfig,
+        reset
     };
 
     setup();

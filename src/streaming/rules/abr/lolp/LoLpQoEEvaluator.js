@@ -35,8 +35,8 @@
  * Mehmet N. Akcay | Ozyegin University | necmettin.akcay@ozu.edu.tr
  * May Lim | National University of Singapore | maylim@comp.nus.edu.sg
  */
-import FactoryMaker from '../../../../core/FactoryMaker';
-import QoeInfo from './QoeInfo';
+import FactoryMaker from '../../../../core/FactoryMaker.js';
+import QoeInfo from './QoeInfo.js';
 
 function LoLpQoeEvaluator() {
 
@@ -83,8 +83,7 @@ function LoLpQoeEvaluator() {
         // set some safe value, else consider throwing error
         if (!fragmentDuration) {
             qoeInfo.weights.bitrateReward = 1;
-        }
-        else {
+        } else {
             qoeInfo.weights.bitrateReward = fragmentDuration;
         }
 
@@ -96,8 +95,7 @@ function LoLpQoeEvaluator() {
         // set some safe value, else consider throwing error
         if (!maxBitrateKbps) {
             qoeInfo.weights.rebufferPenalty = 1000;
-        }
-        else {
+        } else {
             qoeInfo.weights.rebufferPenalty = maxBitrateKbps;
         }
 
@@ -107,8 +105,12 @@ function LoLpQoeEvaluator() {
         qoeInfo.weights.latencyPenalty.push({ threshold: 100000000, penalty: (maxBitrateKbps * 0.1) });
 
         // Set weight: playbackSpeedPenalty
-        if (!minBitrateKbps) qoeInfo.weights.playbackSpeedPenalty = 200;   // set some safe value, else consider throwing error
-        else qoeInfo.weights.playbackSpeedPenalty = minBitrateKbps;
+        if (!minBitrateKbps) {
+            qoeInfo.weights.playbackSpeedPenalty = 200;
+        } // set some safe value, else consider throwing error
+        else {
+            qoeInfo.weights.playbackSpeedPenalty = minBitrateKbps;
+        }
 
         return qoeInfo;
     }

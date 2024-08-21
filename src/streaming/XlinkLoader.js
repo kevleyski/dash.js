@@ -28,28 +28,27 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import DashJSError from './vo/DashJSError';
-import URLLoader from './net/URLLoader';
-import {HTTPRequest} from './vo/metrics/HTTPRequest';
-import TextRequest from './vo/TextRequest';
-import EventBus from '../core/EventBus';
-import Events from '../core/events/Events';
-import FactoryMaker from '../core/FactoryMaker';
-import Errors from '../core/errors/Errors';
+import DashJSError from './vo/DashJSError.js';
+import URLLoader from './net/URLLoader.js';
+import {HTTPRequest} from './vo/metrics/HTTPRequest.js';
+import TextRequest from './vo/TextRequest.js';
+import EventBus from '../core/EventBus.js';
+import Events from '../core/events/Events.js';
+import FactoryMaker from '../core/FactoryMaker.js';
+import Errors from '../core/errors/Errors.js';
 
 function XlinkLoader(config) {
 
     config = config || {};
     const RESOLVE_TO_ZERO = 'urn:mpeg:dash:resolve-to-zero:2013';
 
-    const context  = this.context;
+    const context = this.context;
     const eventBus = EventBus(context).getInstance();
 
     let urlLoader = URLLoader(context).create({
         errHandler: config.errHandler,
         dashMetrics: config.dashMetrics,
         mediaPlayerModel: config.mediaPlayerModel,
-        requestModifier: config.requestModifier,
         errors: Errors
     });
 

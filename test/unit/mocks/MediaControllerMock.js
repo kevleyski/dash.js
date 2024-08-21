@@ -8,11 +8,16 @@ class MediaControllerMock {
         this.initialSettings = {};
         this.switchMode = {};
         this.selectionMode = undefined;
-        this.track  = undefined;
+        this.track = undefined;
         this.tracks = [];
     }
 
-    checkInitialMediaSettingsForType() {}
+    initialize() {
+
+    }
+
+    checkInitialMediaSettingsForType() {
+    }
 
     addTrack(track) {
         this.tracks.push(track);
@@ -40,7 +45,9 @@ class MediaControllerMock {
      * @memberof MediaController#
      */
     setTrack(track) {
-        if (!track) return;
+        if (!track) {
+            return;
+        }
         this.track = track;
     }
 
@@ -50,7 +57,9 @@ class MediaControllerMock {
      * @memberof MediaController#
      */
     setInitialSettings(type, value) {
-        if (!type || !value) return;
+        if (!type || !value) {
+            return;
+        }
 
         this.initialSettings[type] = value;
     }
@@ -61,7 +70,9 @@ class MediaControllerMock {
      * @memberof MediaController#
      */
     getInitialSettings(type) {
-        if (!type) return null;
+        if (!type) {
+            return null;
+        }
 
         return this.initialSettings[type];
     }
@@ -88,7 +99,7 @@ class MediaControllerMock {
         return (type === 'audio' || type === 'video' || type === 'text');
     }
 
-    isTracksEqual(currentTrack, mediaInfoForType) {
+    areTracksEqual(currentTrack, mediaInfoForType) {
         return (mediaInfoForType.lang === 'deu');
     }
 
@@ -99,13 +110,16 @@ class MediaControllerMock {
         return settings.lang === track.lang && matchRole;
     }
 
-    setConfig() {}
+    setConfig() {
+    }
 
-    saveTextSettingsDisabled() {}
+    saveTextSettingsDisabled() {
+    }
 
     reset() {
         this.setup();
     }
 
 }
+
 export default MediaControllerMock;

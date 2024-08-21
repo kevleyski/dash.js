@@ -28,17 +28,18 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import EventsBase from '../../core/events/EventsBase';
+import EventsBase from '../../core/events/EventsBase.js';
+
 /**
  * @class
-  */
+ */
 class ProtectionEvents extends EventsBase {
     /**
      * @description Public facing external events to be used when including protection package.
      * All public events will be aggregated into the MediaPlayerEvents Class and can be accessed
      * via MediaPlayer.events.  public_ is the prefix that we use to move event names to MediaPlayerEvents.
      */
-    constructor () {
+    constructor() {
         super();
 
         /**
@@ -110,7 +111,7 @@ class ProtectionEvents extends EventsBase {
         /**
          * Event ID for events delivered when a key system access procedure
          * has completed
-         * @ignore
+         * @event ProtectionEvents#KEY_SYSTEM_ACCESS_COMPLETE
          */
         this.KEY_SYSTEM_ACCESS_COMPLETE = 'public_keySystemAccessComplete';
 
@@ -164,7 +165,7 @@ class ProtectionEvents extends EventsBase {
          * a protection set has completed
          * @ignore
          */
-        this.TEARDOWN_COMPLETE =  'protectionTeardownComplete';
+        this.TEARDOWN_COMPLETE = 'protectionTeardownComplete';
 
         /**
          * Event ID for events delivered when a HTMLMediaElement has been
