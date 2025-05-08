@@ -91,7 +91,7 @@ function ABRRulesCollection(config) {
             }
 
             if (rule.type === Constants.RULES_TYPES.ABANDON_FRAGMENT_RULES) {
-                abandonFragmentRulesList.push(rule.rule(context).create());
+                abandonFragmentRules.push(rule.rule(context).create());
             }
         });
 
@@ -279,6 +279,14 @@ function ABRRulesCollection(config) {
         eventBus.off(Events.SETTING_UPDATED_ABR_ACTIVE_RULES, _onAbrSettingsActiveRulesUpdated, instance);
     }
 
+    function clearDataForStream(streamId) {
+        [qualitySwitchRules, abandonFragmentRules].forEach(rules => {
+            if (rules && rules.length) {
+                rules.forEach(rule => rule.clearDataForStream && typeof rule.clearDataForStream === 'function' && rule.clearDataForStream(streamId));
+            }
+        });
+    }
+
     function getQualitySwitchRules() {
         return qualitySwitchRules;
     }
@@ -299,12 +307,19 @@ function ABRRulesCollection(config) {
         _updateRules()
     }
 
+    function handleNewMediaInfo(newMediaInfo) {
+        qualitySwitchRules.forEach(rule => rule.handleNewMediaInfo && rule.handleNewMediaInfo(newMediaInfo));
+        abandonFragmentRules.forEach(rule => rule.handleNewMediaInfo && rule.handleNewMediaInfo(newMediaInfo));
+    }
+
     instance = {
+        clearDataForStream,
         getAbandonFragmentRules,
         getBestPossibleSwitchRequest,
         getBolaState,
         getMinSwitchRequest,
         getQualitySwitchRules,
+        handleNewMediaInfo,
         initialize,
         reset,
         setBolaState,

@@ -847,7 +847,14 @@ function AbrController() {
         if (abandonmentStateDict[streamId]) {
             delete abandonmentStateDict[streamId];
         }
+
+        abrRulesCollection.clearDataForStream(streamId);
     }
+
+    function handleNewMediaInfo(newMediaInfo) {
+        abrRulesCollection.handleNewMediaInfo(newMediaInfo);
+    }
+
 
     instance = {
         checkPlaybackQuality,
@@ -858,6 +865,7 @@ function AbrController() {
         getPossibleVoRepresentations,
         getPossibleVoRepresentationsFilteredBySettings,
         getRepresentationByAbsoluteIndex,
+        handleNewMediaInfo,
         initialize,
         isPlayingAtLowestQuality,
         isPlayingAtTopQuality,
